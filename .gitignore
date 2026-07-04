@@ -1,0 +1,12 @@
+credentials.json
+my_env/
+build_env/
+__pycache__/
+*.pyc
+photos/
+dist/
+build/
+*.spec.bak
+.DS_Store
+*.pdf
+.claude/

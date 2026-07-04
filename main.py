@@ -2039,7 +2039,11 @@ class SevakJodaForm(QMainWindow):
                 font_name=PDF_FONT_NAME, font_size=MARATHI_FONT_SIZE, max_width=ADDRESS_MAX_WIDTH,
             )
             text_x = x_left + COL1_W + TEXT_PADDING
-            line_height = BLOCK_H / max(6.0, len(lines) + 0.2)
+            # small extra breathing room after each line (name, address,
+            # mukkam/post, etc.) within the block, on top of the base
+            # tight-packing spacing
+            LINE_SPACING_EXTRA = 0.04 * cm
+            line_height = BLOCK_H / max(6.0, len(lines) + 0.2) + LINE_SPACING_EXTRA
             text_y = y_top - line_height * 0.8
             for line in lines:
                 self._draw_shaped_line(c, _to_devanagari_digits(line), text_x, text_y, MARATHI_FONT_SIZE)

@@ -286,6 +286,17 @@ def _clear(field):
     field.clear()
 
 
+def _to_number(value):
+    """Converts a numeric-looking value (card_id, phone, pincode) to an int
+    so it's written to the sheet as an actual number rather than text.
+    Non-numeric or blank values are left untouched."""
+    if isinstance(value, str):
+        value = value.strip()
+        if value.isdigit():
+            return int(value)
+    return value
+
+
 class TranslateWorker(QThread):
     """Runs the (network-bound) translation calls off the UI thread, so a
     slow/blocked connection can't freeze - or appear to crash - the app."""
@@ -1007,7 +1018,7 @@ class SevakJodaForm(QMainWindow):
             )
             if not duplicate:
                 insert_at = self._find_wari_insert_position(values, wari_name, wari_year, last_name)
-                sheet.insert_row([wari_name, wari_year, card_id, full_name], index=insert_at)
+                sheet.insert_row([wari_name, wari_year, _to_number(card_id), full_name], index=insert_at)
         except Exception as e:
             self._set_busy(False)
             QMessageBox.critical(self, LABELS["error_title"][idx], f"Failed to save: {e}")
@@ -1510,6 +1521,9 @@ class SevakJodaForm(QMainWindow):
                 if not record.get("card_id"):
                     continue
                 record["serial_no"] = existing_rows + len(new_rows)
+                for numeric_key in ("card_id", "phone", "pincode"):
+                    if numeric_key in record:
+                        record[numeric_key] = _to_number(record[numeric_key])
                 out_row = [""] * width
                 for key, value in record.items():
                     col_i = header_map.get(DETAILS_FIELDS.get(key, ""))
@@ -2051,19 +2065,19 @@ class SevakJodaForm(QMainWindow):
 
             field_values = {
                 "serial_no": serial_no,
-                "card_id": card_id,
+                "card_id": _to_number(card_id),
                 "first_en": self.first_name_en.text().strip(),
                 "middle_en": self.middle_name_en.text().strip(),
                 "last_en": self.last_name_en.text().strip(),
                 "dob": self.dob.text().strip(),
-                "phone": self.phone_number.text().strip(),
+                "phone": _to_number(self.phone_number.text().strip()),
                 "address_en": _get_text(self.address_en).strip(),
                 "mukkam_en": self.mukkam_en.text().strip(),
                 "post_en": self.post_en.text().strip(),
                 "taluka_en": self.taluka_en.text().strip(),
                 "district_en": self.district_en.text().strip(),
                 "state_en": self.state_en.text().strip(),
-                "pincode": self.pincode.text().strip(),
+                "pincode": _to_number(self.pincode.text().strip()),
                 "first_mr": self.first_name_mr.text().strip(),
                 "middle_mr": self.middle_name_mr.text().strip(),
                 "last_mr": self.last_name_mr.text().strip(),
@@ -2212,19 +2226,19 @@ class SevakJodaForm(QMainWindow):
                 self.edit_photo_drive_link or self.edit_photo_path or self.edit_original_photo_value or ""
             )
             field_values = {
-                "card_id": self.edit_card_id.text().strip(),
+                "card_id": _to_number(self.edit_card_id.text().strip()),
                 "first_en": self.edit_first_name_en.text().strip(),
                 "middle_en": self.edit_middle_name_en.text().strip(),
                 "last_en": self.edit_last_name_en.text().strip(),
                 "dob": self.edit_dob.text().strip(),
-                "phone": self.edit_phone_number.text().strip(),
+                "phone": _to_number(self.edit_phone_number.text().strip()),
                 "address_en": _get_text(self.edit_address_en).strip(),
                 "mukkam_en": self.edit_mukkam_en.text().strip(),
                 "post_en": self.edit_post_en.text().strip(),
                 "taluka_en": self.edit_taluka_en.text().strip(),
                 "district_en": self.edit_district_en.text().strip(),
                 "state_en": self.edit_state_en.text().strip(),
-                "pincode": self.edit_pincode.text().strip(),
+                "pincode": _to_number(self.edit_pincode.text().strip()),
                 "first_mr": self.edit_first_name_mr.text().strip(),
                 "middle_mr": self.edit_middle_name_mr.text().strip(),
                 "last_mr": self.edit_last_name_mr.text().strip(),

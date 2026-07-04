@@ -1182,11 +1182,13 @@ class SevakJodaForm(QMainWindow):
         PER_PAGE = COLS * ROWS_PER_PAGE
         NAME_FONT_SIZE = 8
         # Gap between rows so each row has clear space above and below it
-        # once cut out (cells within a row still touch, for one clean cut).
+        # once cut out, and a small gap between columns so side-by-side
+        # cuts don't need to split a shared border either.
         ROW_GAP = 0.3 * cm
+        COL_GAP = 0.1 * cm
 
         page_width, page_height = A4
-        grid_w = CELL_W * COLS
+        grid_w = COLS * CELL_W + (COLS - 1) * COL_GAP
         grid_h = ROWS_PER_PAGE * CELL_H + (ROWS_PER_PAGE - 1) * ROW_GAP
         margin_left = (page_width - grid_w) / 2
         margin_top = (page_height - grid_h) / 2
@@ -1202,7 +1204,7 @@ class SevakJodaForm(QMainWindow):
 
             row = pos_in_page // COLS
             col = pos_in_page % COLS
-            x_left = margin_left + col * CELL_W
+            x_left = margin_left + col * (CELL_W + COL_GAP)
             y_top = page_height - margin_top - row * (CELL_H + ROW_GAP)
             y_bottom = y_top - CELL_H
             photo_y_bottom = y_top - PHOTO_H

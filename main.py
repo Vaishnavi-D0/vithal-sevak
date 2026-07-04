@@ -1331,29 +1331,36 @@ class SevakJodaForm(QMainWindow):
         return abbreviated
 
     def _render_pass_photo_pdf(self, save_path, card_ids, details_map):
-        """Renders a grid of passport-style photos (4 per row, 5 rows per
-        page = 20/page) with the member's name below each, for printing on
-        glossy paper and cutting out to stick on an ID card."""
+        """Renders a grid of passport-style photos, as many per page as fit
+        within a 0.5cm margin on every side, with the member's name below
+        each - for printing on glossy paper and cutting out to stick on an
+        ID card."""
         PHOTO_W = 2.8 * cm
         PHOTO_H = 3 * cm
         NAME_H = 0.6 * cm
         CELL_W = PHOTO_W
         CELL_H = PHOTO_H + NAME_H
-        COLS = 4
-        ROWS_PER_PAGE = 5
-        PER_PAGE = COLS * ROWS_PER_PAGE
         NAME_FONT_SIZE = 8
         # Gap between rows so each row has clear space above and below it
         # once cut out, and a small gap between columns so side-by-side
         # cuts don't need to split a shared border either.
         ROW_GAP = 0.3 * cm
         COL_GAP = 0.1 * cm
+        PAGE_MARGIN = 0.5 * cm
 
         page_width, page_height = A4
+        usable_w = page_width - 2 * PAGE_MARGIN
+        usable_h = page_height - 2 * PAGE_MARGIN
+        # fit as many columns/rows as possible within the usable area
+        COLS = max(1, int((usable_w + COL_GAP) // (CELL_W + COL_GAP)))
+        ROWS_PER_PAGE = max(1, int((usable_h + ROW_GAP) // (CELL_H + ROW_GAP)))
+        PER_PAGE = COLS * ROWS_PER_PAGE
+
         grid_w = COLS * CELL_W + (COLS - 1) * COL_GAP
         grid_h = ROWS_PER_PAGE * CELL_H + (ROWS_PER_PAGE - 1) * ROW_GAP
-        margin_left = (page_width - grid_w) / 2
-        margin_top = (page_height - grid_h) / 2
+        # center the grid within the 0.5cm-margined usable area
+        margin_left = PAGE_MARGIN + (usable_w - grid_w) / 2
+        margin_top = PAGE_MARGIN + (usable_h - grid_h) / 2
 
         c = pdfcanvas.Canvas(save_path, pagesize=A4)
         photo_cache = {}
@@ -1945,9 +1952,9 @@ class SevakJodaForm(QMainWindow):
         COL5_W = self.PHOTO_LIST_COL5_W
         col_widths = [COL1_W, COL2_W, COL3_W, COL4_W, COL5_W]
         BLOCK_W = sum(col_widths)
-        # a touch taller than 3cm to give the bigger 11pt font breathing
+        # a touch taller than 3cm to give the bigger 12pt font breathing
         # room, while every block still shares this same fixed size
-        BLOCK_H = 3.15 * cm
+        BLOCK_H = 3.3 * cm
         HEADER_H = 0.4 * cm
         MEMBERS_PER_PAGE = 7
         MARGIN_TOP = 1.5 * cm
@@ -1957,7 +1964,7 @@ class SevakJodaForm(QMainWindow):
         c = pdfcanvas.Canvas(save_path, pagesize=A4)
         photo_cache = {}
         FONT_SIZE = 9
-        MARATHI_FONT_SIZE = 11
+        MARATHI_FONT_SIZE = 12
         HEADER_FONT_SIZE = 8
         TEXT_PADDING = 0.15 * cm
         ADDRESS_MAX_WIDTH = COL2_W - TEXT_PADDING - 0.1 * cm

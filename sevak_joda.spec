@@ -51,6 +51,7 @@ a = Analysis(
         ("translator.py", "."),
         ("drive_helper.py", "."),
         ("marathi_text_render.py", "."),
+        ("network_utils.py", "."),
         ("fonts/NotoSansDevanagari-Regular.ttf", "fonts"),
     ] + extra_datas,
     hiddenimports=hidden_imports,

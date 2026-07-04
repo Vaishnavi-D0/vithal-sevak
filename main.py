@@ -33,6 +33,7 @@ from scanner_capture import scan_photo
 from translator import translate_to_marathi
 from marathi_keyboard import MarathiKeyboard
 import drive_helper
+from network_utils import with_retry
 
 # ---------- CONFIG ----------
 SHEET_ID = "1UfznX39WYRFcl40K32C8zdi7Xhi4WYVn5rpd3emkIUk"
@@ -92,6 +93,16 @@ LABELS = {
     "lbl_middle_mr": ("मधले नाव (Marathi):", "मधले नाव (मराठी):"),
     "lbl_last_mr": ("आडनाव (Marathi):", "आडनाव (मराठी):"),
     "lbl_address_mr": ("पत्ता (Marathi):", "पत्ता (मराठी):"),
+    "lbl_mukkam_en": ("Mukkam (English):", "मुक्काम (इंग्रजी):"),
+    "lbl_post_en": ("Post (English):", "पोस्ट (इंग्रजी):"),
+    "lbl_taluka_en": ("Taluka (English):", "तालुका (इंग्रजी):"),
+    "lbl_district_en": ("District (English):", "जिल्हा (इंग्रजी):"),
+    "lbl_state_en": ("State (English):", "राज्य (इंग्रजी):"),
+    "lbl_mukkam_mr": ("मुक्काम (Marathi):", "मुक्काम (मराठी):"),
+    "lbl_post_mr": ("पोस्ट (Marathi):", "पोस्ट (मराठी):"),
+    "lbl_taluka_mr": ("तालुका (Marathi):", "तालुका (मराठी):"),
+    "lbl_jilha_mr": ("जिल्हा (Marathi):", "जिल्हा (मराठी):"),
+    "lbl_state_mr": ("राज्य (Marathi):", "राज्य (मराठी):"),
     "btn_translate": ("🌐 Translate English → Marathi", "🌐 इंग्रजी → मराठी भाषांतर"),
     "btn_scan": ("📷 Scan Photo", "📷 फोटो स्कॅन करा"),
     "btn_browse": ("🖼 Select from Local", "🖼 स्थानिक फाइल निवडा"),
@@ -143,14 +154,19 @@ LABELS = {
 DETAILS_SHEET_NAME = "Sevak Details"
 
 
-def get_sheet(worksheet_name=DETAILS_SHEET_NAME):
-    """Opens a specific worksheet (tab) by name within the spreadsheet.
-    The workbook has multiple sheets, so callers must say which one they need."""
+def _open_sheet(worksheet_name):
     scopes = ["https://www.googleapis.com/auth/spreadsheets",
               "https://www.googleapis.com/auth/drive"]
     creds = Credentials.from_service_account_file(CREDENTIALS_FILE, scopes=scopes)
     client = gspread.authorize(creds)
     return client.open_by_key(SHEET_ID).worksheet(worksheet_name)
+
+
+def get_sheet(worksheet_name=DETAILS_SHEET_NAME):
+    """Opens a specific worksheet (tab) by name within the spreadsheet.
+    The workbook has multiple sheets, so callers must say which one they need.
+    Retries on transient network errors (e.g. brief DNS hiccups)."""
+    return with_retry(_open_sheet, worksheet_name)
 
 
 # Maps our internal field keys to the actual column header text in the
@@ -458,6 +474,11 @@ class SevakJodaForm(QMainWindow):
         self.phone_number = QLineEdit(); self.phone_number.setFont(eng_font)
         self.address_en = QTextEdit(); self.address_en.setFont(eng_font)
         self.address_en.setMinimumHeight(90)
+        self.mukkam_en = QLineEdit(); self.mukkam_en.setFont(eng_font)
+        self.post_en = QLineEdit(); self.post_en.setFont(eng_font)
+        self.taluka_en = QLineEdit(); self.taluka_en.setFont(eng_font)
+        self.district_en = QLineEdit(); self.district_en.setFont(eng_font)
+        self.state_en = QLineEdit(); self.state_en.setFont(eng_font)
         self.pincode = QLineEdit(); self.pincode.setFont(eng_font)
 
         add_row("lbl_card_id", self.card_id)
@@ -467,6 +488,11 @@ class SevakJodaForm(QMainWindow):
         add_row("lbl_dob", self.dob)
         add_row("lbl_phone", self.phone_number)
         add_row("lbl_address_en", self.address_en)
+        add_row("lbl_mukkam_en", self.mukkam_en)
+        add_row("lbl_post_en", self.post_en)
+        add_row("lbl_taluka_en", self.taluka_en)
+        add_row("lbl_district_en", self.district_en)
+        add_row("lbl_state_en", self.state_en)
         add_row("lbl_pincode", self.pincode)
 
         # Marathi fields
@@ -476,6 +502,11 @@ class SevakJodaForm(QMainWindow):
         self.last_name_mr = QLineEdit(); self.last_name_mr.setFont(mr_font)
         self.address_mr = QTextEdit(); self.address_mr.setFont(mr_font)
         self.address_mr.setMinimumHeight(90)
+        self.mukkam_mr = QLineEdit(); self.mukkam_mr.setFont(mr_font)
+        self.post_mr = QLineEdit(); self.post_mr.setFont(mr_font)
+        self.taluka_mr = QLineEdit(); self.taluka_mr.setFont(mr_font)
+        self.jilha_mr = QLineEdit(); self.jilha_mr.setFont(mr_font)
+        self.state_mr = QLineEdit(); self.state_mr.setFont(mr_font)
 
         self.marathi_keyboard = MarathiKeyboard(self)
 
@@ -485,12 +516,22 @@ class SevakJodaForm(QMainWindow):
             (self.middle_name_en, self.middle_name_mr),
             (self.last_name_en, self.last_name_mr),
             (self.address_en, self.address_mr),
+            (self.mukkam_en, self.mukkam_mr),
+            (self.post_en, self.post_mr),
+            (self.taluka_en, self.taluka_mr),
+            (self.district_en, self.jilha_mr),
+            (self.state_en, self.state_mr),
         ]
 
         add_row("lbl_first_mr", self._mr_row(self.first_name_mr))
         add_row("lbl_middle_mr", self._mr_row(self.middle_name_mr))
         add_row("lbl_last_mr", self._mr_row(self.last_name_mr))
         add_row("lbl_address_mr", self._mr_row(self.address_mr))
+        add_row("lbl_mukkam_mr", self._mr_row(self.mukkam_mr))
+        add_row("lbl_post_mr", self._mr_row(self.post_mr))
+        add_row("lbl_taluka_mr", self._mr_row(self.taluka_mr))
+        add_row("lbl_jilha_mr", self._mr_row(self.jilha_mr))
+        add_row("lbl_state_mr", self._mr_row(self.state_mr))
 
         main_layout.addLayout(form)
 
@@ -566,6 +607,11 @@ class SevakJodaForm(QMainWindow):
         self.edit_phone_number = QLineEdit(); self.edit_phone_number.setFont(eng_font)
         self.edit_address_en = QTextEdit(); self.edit_address_en.setFont(eng_font)
         self.edit_address_en.setMinimumHeight(90)
+        self.edit_mukkam_en = QLineEdit(); self.edit_mukkam_en.setFont(eng_font)
+        self.edit_post_en = QLineEdit(); self.edit_post_en.setFont(eng_font)
+        self.edit_taluka_en = QLineEdit(); self.edit_taluka_en.setFont(eng_font)
+        self.edit_district_en = QLineEdit(); self.edit_district_en.setFont(eng_font)
+        self.edit_state_en = QLineEdit(); self.edit_state_en.setFont(eng_font)
         self.edit_pincode = QLineEdit(); self.edit_pincode.setFont(eng_font)
 
         add_row("lbl_card_id", self.edit_card_id)
@@ -575,6 +621,11 @@ class SevakJodaForm(QMainWindow):
         add_row("lbl_dob", self.edit_dob)
         add_row("lbl_phone", self.edit_phone_number)
         add_row("lbl_address_en", self.edit_address_en)
+        add_row("lbl_mukkam_en", self.edit_mukkam_en)
+        add_row("lbl_post_en", self.edit_post_en)
+        add_row("lbl_taluka_en", self.edit_taluka_en)
+        add_row("lbl_district_en", self.edit_district_en)
+        add_row("lbl_state_en", self.edit_state_en)
         add_row("lbl_pincode", self.edit_pincode)
 
         mr_font = QFont(MARATHI_FONT, 12)
@@ -583,18 +634,33 @@ class SevakJodaForm(QMainWindow):
         self.edit_last_name_mr = QLineEdit(); self.edit_last_name_mr.setFont(mr_font)
         self.edit_address_mr = QTextEdit(); self.edit_address_mr.setFont(mr_font)
         self.edit_address_mr.setMinimumHeight(90)
+        self.edit_mukkam_mr = QLineEdit(); self.edit_mukkam_mr.setFont(mr_font)
+        self.edit_post_mr = QLineEdit(); self.edit_post_mr.setFont(mr_font)
+        self.edit_taluka_mr = QLineEdit(); self.edit_taluka_mr.setFont(mr_font)
+        self.edit_jilha_mr = QLineEdit(); self.edit_jilha_mr.setFont(mr_font)
+        self.edit_state_mr = QLineEdit(); self.edit_state_mr.setFont(mr_font)
 
         self.edit_translation_pairs = [
             (self.edit_first_name_en, self.edit_first_name_mr),
             (self.edit_middle_name_en, self.edit_middle_name_mr),
             (self.edit_last_name_en, self.edit_last_name_mr),
             (self.edit_address_en, self.edit_address_mr),
+            (self.edit_mukkam_en, self.edit_mukkam_mr),
+            (self.edit_post_en, self.edit_post_mr),
+            (self.edit_taluka_en, self.edit_taluka_mr),
+            (self.edit_district_en, self.edit_jilha_mr),
+            (self.edit_state_en, self.edit_state_mr),
         ]
 
         add_row("lbl_first_mr", self._mr_row(self.edit_first_name_mr))
         add_row("lbl_middle_mr", self._mr_row(self.edit_middle_name_mr))
         add_row("lbl_last_mr", self._mr_row(self.edit_last_name_mr))
         add_row("lbl_address_mr", self._mr_row(self.edit_address_mr))
+        add_row("lbl_mukkam_mr", self._mr_row(self.edit_mukkam_mr))
+        add_row("lbl_post_mr", self._mr_row(self.edit_post_mr))
+        add_row("lbl_taluka_mr", self._mr_row(self.edit_taluka_mr))
+        add_row("lbl_jilha_mr", self._mr_row(self.edit_jilha_mr))
+        add_row("lbl_state_mr", self._mr_row(self.edit_state_mr))
 
         main_layout.addLayout(form)
 
@@ -755,6 +821,23 @@ class SevakJodaForm(QMainWindow):
         if not sheet.get_all_values():
             sheet.append_row(["Wari Name", "Wari Year", "Card Id", "Name English"])
 
+    @staticmethod
+    def _find_wari_insert_position(values, wari_name, wari_year, new_last_name):
+        """Returns the 1-based sheet row index to insert a new attendee at,
+        keeping attendees of the same Wari+year sorted by last name (the
+        last word of the stored "Name English" column)."""
+        new_last_name = (new_last_name or "").strip().lower()
+        last_matching_row = None
+        for i, row in enumerate(values[1:], start=2):
+            if len(row) < 4 or row[0] != wari_name or str(row[1]) != str(wari_year):
+                continue
+            last_matching_row = i
+            existing_name = row[3].strip()
+            existing_last_name = existing_name.split()[-1].lower() if existing_name else ""
+            if new_last_name < existing_last_name:
+                return i
+        return (last_matching_row + 1) if last_matching_row is not None else len(values) + 1
+
     def save_wari_attendee(self):
         idx = 0 if self.lang == "en" else 1
         if not self.selected_wari_member:
@@ -766,17 +849,19 @@ class SevakJodaForm(QMainWindow):
         wari_year = self.wari_year_spin.value()
         card_id = self.selected_wari_member["card_id"]
         full_name = self._full_name_en(self.selected_wari_member)
+        last_name = self.selected_wari_member.get("last_en", "")
 
         try:
             sheet = get_sheet(WARI_SHEET_NAME)
             self._ensure_wari_header(sheet)
-            existing = sheet.get_all_values()[1:]
-            for row in existing:
+            values = sheet.get_all_values()
+            for row in values[1:]:
                 if len(row) >= 3 and row[0] == wari_name and str(row[1]) == str(wari_year) and row[2] == card_id:
                     QMessageBox.information(self, LABELS["duplicate_title"][idx], LABELS["duplicate_body"][idx])
                     return
 
-            sheet.append_row([wari_name, wari_year, card_id, full_name])
+            insert_at = self._find_wari_insert_position(values, wari_name, wari_year, last_name)
+            sheet.insert_row([wari_name, wari_year, card_id, full_name], index=insert_at)
             QMessageBox.information(self, LABELS["success_title"][idx], LABELS["wari_added_body"][idx])
             self.refresh_wari_attendees_list()
         except Exception as e:
@@ -1315,11 +1400,21 @@ class SevakJodaForm(QMainWindow):
                 "dob": self.dob.text().strip(),
                 "phone": self.phone_number.text().strip(),
                 "address_en": _get_text(self.address_en).strip(),
+                "mukkam_en": self.mukkam_en.text().strip(),
+                "post_en": self.post_en.text().strip(),
+                "taluka_en": self.taluka_en.text().strip(),
+                "district_en": self.district_en.text().strip(),
+                "state_en": self.state_en.text().strip(),
                 "pincode": self.pincode.text().strip(),
                 "first_mr": self.first_name_mr.text().strip(),
                 "middle_mr": self.middle_name_mr.text().strip(),
                 "last_mr": self.last_name_mr.text().strip(),
                 "address_mr": _get_text(self.address_mr).strip(),
+                "mukkam_mr": self.mukkam_mr.text().strip(),
+                "post_mr": self.post_mr.text().strip(),
+                "taluka_mr": self.taluka_mr.text().strip(),
+                "jilha_mr": self.jilha_mr.text().strip(),
+                "state_mr": self.state_mr.text().strip(),
                 "photo": self.photo_drive_link or self.photo_path or "",
             }
 
@@ -1339,8 +1434,10 @@ class SevakJodaForm(QMainWindow):
 
     def clear_form(self):
         for field in [self.card_id, self.first_name_en, self.middle_name_en, self.last_name_en, self.dob,
-                      self.phone_number, self.address_en, self.pincode, self.first_name_mr,
-                      self.middle_name_mr, self.last_name_mr, self.address_mr]:
+                      self.phone_number, self.address_en, self.mukkam_en, self.post_en, self.taluka_en,
+                      self.district_en, self.state_en, self.pincode, self.first_name_mr,
+                      self.middle_name_mr, self.last_name_mr, self.address_mr, self.mukkam_mr,
+                      self.post_mr, self.taluka_mr, self.jilha_mr, self.state_mr]:
             _clear(field)
         self.photo_path = None
         self.photo_drive_id = None
@@ -1392,11 +1489,21 @@ class SevakJodaForm(QMainWindow):
         self.edit_dob.setText(record["dob"])
         self.edit_phone_number.setText(record["phone"])
         _set_text(self.edit_address_en, record["address_en"])
+        self.edit_mukkam_en.setText(record["mukkam_en"])
+        self.edit_post_en.setText(record["post_en"])
+        self.edit_taluka_en.setText(record["taluka_en"])
+        self.edit_district_en.setText(record["district_en"])
+        self.edit_state_en.setText(record["state_en"])
         self.edit_pincode.setText(record["pincode"])
         self.edit_first_name_mr.setText(record["first_mr"])
         self.edit_middle_name_mr.setText(record["middle_mr"])
         self.edit_last_name_mr.setText(record["last_mr"])
         _set_text(self.edit_address_mr, record["address_mr"])
+        self.edit_mukkam_mr.setText(record["mukkam_mr"])
+        self.edit_post_mr.setText(record["post_mr"])
+        self.edit_taluka_mr.setText(record["taluka_mr"])
+        self.edit_jilha_mr.setText(record["jilha_mr"])
+        self.edit_state_mr.setText(record["state_mr"])
 
         photo_value = record["photo"]
         self.edit_original_photo_value = photo_value
@@ -1444,11 +1551,21 @@ class SevakJodaForm(QMainWindow):
                 "dob": self.edit_dob.text().strip(),
                 "phone": self.edit_phone_number.text().strip(),
                 "address_en": _get_text(self.edit_address_en).strip(),
+                "mukkam_en": self.edit_mukkam_en.text().strip(),
+                "post_en": self.edit_post_en.text().strip(),
+                "taluka_en": self.edit_taluka_en.text().strip(),
+                "district_en": self.edit_district_en.text().strip(),
+                "state_en": self.edit_state_en.text().strip(),
                 "pincode": self.edit_pincode.text().strip(),
                 "first_mr": self.edit_first_name_mr.text().strip(),
                 "middle_mr": self.edit_middle_name_mr.text().strip(),
                 "last_mr": self.edit_last_name_mr.text().strip(),
                 "address_mr": _get_text(self.edit_address_mr).strip(),
+                "mukkam_mr": self.edit_mukkam_mr.text().strip(),
+                "post_mr": self.edit_post_mr.text().strip(),
+                "taluka_mr": self.edit_taluka_mr.text().strip(),
+                "jilha_mr": self.edit_jilha_mr.text().strip(),
+                "state_mr": self.edit_state_mr.text().strip(),
                 "photo": photo_value,
             }
 

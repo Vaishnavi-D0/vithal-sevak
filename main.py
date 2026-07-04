@@ -1861,11 +1861,6 @@ class SevakJodaForm(QMainWindow):
         onto a new line when it doesn't fit."""
         lines = [full_name]
 
-        # If the address needs to wrap (doesn't fit on one line) and
-        # mukkam/post/taluka/district are all blank, the wrapped
-        # continuation line(s) naturally land where those fields' lines
-        # would otherwise have been (since blank fields are skipped, not
-        # left as empty lines) - so no gap is left unused.
         address_mr = (record.get("address_mr", "") or "").strip()
         if address_mr:
             if font_name and font_size and max_width:
@@ -2044,11 +2039,7 @@ class SevakJodaForm(QMainWindow):
                 font_name=PDF_FONT_NAME, font_size=MARATHI_FONT_SIZE, max_width=ADDRESS_MAX_WIDTH,
             )
             text_x = x_left + COL1_W + TEXT_PADDING
-            # never let lines pack tighter than the font itself (that would
-            # make them overlap and become illegible) - in the rare case of
-            # many lines it's better to run slightly past the bottom border
-            # than to overlap text
-            line_height = max(MARATHI_FONT_SIZE + 1, BLOCK_H / max(6.0, len(lines) + 0.2))
+            line_height = BLOCK_H / max(6.0, len(lines) + 0.2)
             text_y = y_top - line_height * 0.8
             for line in lines:
                 self._draw_shaped_line(c, _to_devanagari_digits(line), text_x, text_y, MARATHI_FONT_SIZE)

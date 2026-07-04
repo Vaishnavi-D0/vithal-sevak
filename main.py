@@ -347,8 +347,11 @@ class SevakJodaForm(QMainWindow):
             QApplication.setOverrideCursor(Qt.WaitCursor)
             self.statusBar().showMessage(message or LABELS["status_processing"][idx])
         else:
-            QApplication.restoreOverrideCursor()
-            self._busy_depth = max(0, self._busy_depth - 1)
+            # guard against being called more times than _set_busy(True) was
+            # (harmless no-op instead of underflowing Qt's cursor stack)
+            if self._busy_depth > 0:
+                QApplication.restoreOverrideCursor()
+                self._busy_depth -= 1
             if self._busy_depth == 0:
                 self.centralWidget().setEnabled(True)
                 self.statusBar().clearMessage()
@@ -891,10 +894,10 @@ class SevakJodaForm(QMainWindow):
         try:
             records = self.fetch_details_records()
         except Exception as e:
+            self._set_busy(False)
             QMessageBox.critical(self, LABELS["error_title"][idx], f"Search failed: {e}")
             return
-        finally:
-            self._set_busy(False)
+        self._set_busy(False)
 
         matches = [
             r for r in records
@@ -961,19 +964,24 @@ class SevakJodaForm(QMainWindow):
             sheet = get_sheet(WARI_SHEET_NAME)
             self._ensure_wari_header(sheet)
             values = sheet.get_all_values()
-            for row in values[1:]:
-                if len(row) >= 3 and row[0] == wari_name and str(row[1]) == str(wari_year) and row[2] == card_id:
-                    QMessageBox.information(self, LABELS["duplicate_title"][idx], LABELS["duplicate_body"][idx])
-                    return
-
-            insert_at = self._find_wari_insert_position(values, wari_name, wari_year, last_name)
-            sheet.insert_row([wari_name, wari_year, card_id, full_name], index=insert_at)
-            QMessageBox.information(self, LABELS["success_title"][idx], LABELS["wari_added_body"][idx])
-            self.refresh_wari_attendees_list()
+            duplicate = any(
+                len(row) >= 3 and row[0] == wari_name and str(row[1]) == str(wari_year) and row[2] == card_id
+                for row in values[1:]
+            )
+            if not duplicate:
+                insert_at = self._find_wari_insert_position(values, wari_name, wari_year, last_name)
+                sheet.insert_row([wari_name, wari_year, card_id, full_name], index=insert_at)
         except Exception as e:
-            QMessageBox.critical(self, LABELS["error_title"][idx], f"Failed to save: {e}")
-        finally:
             self._set_busy(False)
+            QMessageBox.critical(self, LABELS["error_title"][idx], f"Failed to save: {e}")
+            return
+        self._set_busy(False)
+
+        if duplicate:
+            QMessageBox.information(self, LABELS["duplicate_title"][idx], LABELS["duplicate_body"][idx])
+            return
+        QMessageBox.information(self, LABELS["success_title"][idx], LABELS["wari_added_body"][idx])
+        self.refresh_wari_attendees_list()
 
     def refresh_wari_attendees_list(self):
         idx = 0 if self.lang == "en" else 1
@@ -1015,12 +1023,13 @@ class SevakJodaForm(QMainWindow):
         try:
             sheet = get_sheet(WARI_SHEET_NAME)
             sheet.delete_rows(row_number)
-            self.refresh_wari_attendees_list()
-            QMessageBox.information(self, LABELS["success_title"][idx], LABELS["remove_success_body"][idx])
         except Exception as e:
-            QMessageBox.critical(self, LABELS["error_title"][idx], f"Failed to remove: {e}")
-        finally:
             self._set_busy(False)
+            QMessageBox.critical(self, LABELS["error_title"][idx], f"Failed to remove: {e}")
+            return
+        self._set_busy(False)
+        self.refresh_wari_attendees_list()
+        QMessageBox.information(self, LABELS["success_title"][idx], LABELS["remove_success_body"][idx])
 
     # ---------- Create Wari Photo List page ----------
 
@@ -1107,28 +1116,29 @@ class SevakJodaForm(QMainWindow):
 
         self._set_busy(True, LABELS["status_loading"][idx])
         try:
-            try:
-                wari_sheet = get_sheet(WARI_SHEET_NAME)
-                wari_values = wari_sheet.get_all_values()
-            except Exception as e:
-                QMessageBox.critical(self, LABELS["error_title"][idx], f"Could not read Wari Attendees: {e}")
-                return
-
-            attendee_card_ids = [
-                row[2] for row in wari_values[1:]
-                if len(row) >= 3 and row[0] == wari_name and str(row[1]) == str(wari_year) and row[2].strip()
-            ]
-            if not attendee_card_ids:
-                QMessageBox.warning(self, LABELS["pdf_no_attendees_title"][idx], LABELS["pdf_no_attendees_body"][idx])
-                return
-
-            try:
-                details_map = self.fetch_full_details_map()
-            except Exception as e:
-                QMessageBox.critical(self, LABELS["error_title"][idx], f"Could not read Sevak Details: {e}")
-                return
-        finally:
+            wari_sheet = get_sheet(WARI_SHEET_NAME)
+            wari_values = wari_sheet.get_all_values()
+        except Exception as e:
             self._set_busy(False)
+            QMessageBox.critical(self, LABELS["error_title"][idx], f"Could not read Wari Attendees: {e}")
+            return
+
+        attendee_card_ids = [
+            row[2] for row in wari_values[1:]
+            if len(row) >= 3 and row[0] == wari_name and str(row[1]) == str(wari_year) and row[2].strip()
+        ]
+        if not attendee_card_ids:
+            self._set_busy(False)
+            QMessageBox.warning(self, LABELS["pdf_no_attendees_title"][idx], LABELS["pdf_no_attendees_body"][idx])
+            return
+
+        try:
+            details_map = self.fetch_full_details_map()
+        except Exception as e:
+            self._set_busy(False)
+            QMessageBox.critical(self, LABELS["error_title"][idx], f"Could not read Sevak Details: {e}")
+            return
+        self._set_busy(False)
 
         default_name = f"Wari_{wari_name}_{wari_year}_PassPhotos.pdf"
         save_path, _ = QFileDialog.getSaveFileName(
@@ -1140,11 +1150,12 @@ class SevakJodaForm(QMainWindow):
         self._set_busy(True, LABELS["status_generating_pdf"][idx])
         try:
             self._render_pass_photo_pdf(save_path, attendee_card_ids, details_map)
-            QMessageBox.information(self, LABELS["success_title"][idx], LABELS["pdf_success_body"][idx])
         except Exception as e:
-            QMessageBox.critical(self, LABELS["error_title"][idx], f"Failed to create PDF: {e}")
-        finally:
             self._set_busy(False)
+            QMessageBox.critical(self, LABELS["error_title"][idx], f"Failed to create PDF: {e}")
+            return
+        self._set_busy(False)
+        QMessageBox.information(self, LABELS["success_title"][idx], LABELS["pdf_success_body"][idx])
 
     def _fit_pass_photo_name(self, last_name, first_name, font_name, font_size, max_width):
         """Returns "Last First" if it fits within max_width, otherwise
@@ -1170,10 +1181,13 @@ class SevakJodaForm(QMainWindow):
         ROWS_PER_PAGE = 5
         PER_PAGE = COLS * ROWS_PER_PAGE
         NAME_FONT_SIZE = 8
+        # Gap between rows so each row has clear space above and below it
+        # once cut out (cells within a row still touch, for one clean cut).
+        ROW_GAP = 0.3 * cm
 
         page_width, page_height = A4
         grid_w = CELL_W * COLS
-        grid_h = CELL_H * ROWS_PER_PAGE
+        grid_h = ROWS_PER_PAGE * CELL_H + (ROWS_PER_PAGE - 1) * ROW_GAP
         margin_left = (page_width - grid_w) / 2
         margin_top = (page_height - grid_h) / 2
 
@@ -1189,7 +1203,7 @@ class SevakJodaForm(QMainWindow):
             row = pos_in_page // COLS
             col = pos_in_page % COLS
             x_left = margin_left + col * CELL_W
-            y_top = page_height - margin_top - row * CELL_H
+            y_top = page_height - margin_top - row * (CELL_H + ROW_GAP)
             y_bottom = y_top - CELL_H
             photo_y_bottom = y_top - PHOTO_H
 
@@ -1370,28 +1384,29 @@ class SevakJodaForm(QMainWindow):
 
         self._set_busy(True, LABELS["status_loading"][idx])
         try:
-            try:
-                wari_sheet = get_sheet(WARI_SHEET_NAME)
-                wari_values = wari_sheet.get_all_values()
-            except Exception as e:
-                QMessageBox.critical(self, LABELS["error_title"][idx], f"Could not read Wari Attendees: {e}")
-                return
-
-            attendee_card_ids = [
-                row[2] for row in wari_values[1:]
-                if len(row) >= 3 and row[0] == wari_name and str(row[1]) == str(wari_year) and row[2].strip()
-            ]
-            if not attendee_card_ids:
-                QMessageBox.warning(self, LABELS["pdf_no_attendees_title"][idx], LABELS["pdf_no_attendees_body"][idx])
-                return
-
-            try:
-                details_map = self.fetch_full_details_map()
-            except Exception as e:
-                QMessageBox.critical(self, LABELS["error_title"][idx], f"Could not read Sevak Details: {e}")
-                return
-        finally:
+            wari_sheet = get_sheet(WARI_SHEET_NAME)
+            wari_values = wari_sheet.get_all_values()
+        except Exception as e:
             self._set_busy(False)
+            QMessageBox.critical(self, LABELS["error_title"][idx], f"Could not read Wari Attendees: {e}")
+            return
+
+        attendee_card_ids = [
+            row[2] for row in wari_values[1:]
+            if len(row) >= 3 and row[0] == wari_name and str(row[1]) == str(wari_year) and row[2].strip()
+        ]
+        if not attendee_card_ids:
+            self._set_busy(False)
+            QMessageBox.warning(self, LABELS["pdf_no_attendees_title"][idx], LABELS["pdf_no_attendees_body"][idx])
+            return
+
+        try:
+            details_map = self.fetch_full_details_map()
+        except Exception as e:
+            self._set_busy(False)
+            QMessageBox.critical(self, LABELS["error_title"][idx], f"Could not read Sevak Details: {e}")
+            return
+        self._set_busy(False)
 
         default_name = f"Wari_{wari_name}_{wari_year}_PhotoList.pdf"
         save_path, _ = QFileDialog.getSaveFileName(
@@ -1403,11 +1418,12 @@ class SevakJodaForm(QMainWindow):
         self._set_busy(True, LABELS["status_generating_pdf"][idx])
         try:
             self._render_photo_list_pdf(save_path, attendee_card_ids, details_map)
-            QMessageBox.information(self, LABELS["success_title"][idx], LABELS["pdf_success_body"][idx])
         except Exception as e:
-            QMessageBox.critical(self, LABELS["error_title"][idx], f"Failed to create PDF: {e}")
-        finally:
             self._set_busy(False)
+            QMessageBox.critical(self, LABELS["error_title"][idx], f"Failed to create PDF: {e}")
+            return
+        self._set_busy(False)
+        QMessageBox.information(self, LABELS["success_title"][idx], LABELS["pdf_success_body"][idx])
 
     # Column widths for the Wari photo list PDF. Sr.no / Name / Photo per
     # the original spec (1.5 + 6.7 + 2.8 = 11cm); Pass no. / Sign are new,
@@ -1608,13 +1624,16 @@ class SevakJodaForm(QMainWindow):
         try:
             filepath = scan_photo()
             filepath = self._rename_photo_to_card_id(filepath, context)
-            self.set_photo(filepath, context=context, upload_to_drive=True)
         except RuntimeError as e:
-            QMessageBox.warning(self, "Scanner Error", str(e))
-        except Exception as e:
-            QMessageBox.critical(self, "Scanner Error", f"Scan failed: {e}")
-        finally:
             self._set_busy(False)
+            QMessageBox.warning(self, "Scanner Error", str(e))
+            return
+        except Exception as e:
+            self._set_busy(False)
+            QMessageBox.critical(self, "Scanner Error", f"Scan failed: {e}")
+            return
+        self.set_photo(filepath, context=context, upload_to_drive=True)
+        self._set_busy(False)
 
     def browse_local_photo(self, context="add"):
         """Lets the user pick an existing image file from disk instead of scanning."""
@@ -1630,11 +1649,12 @@ class SevakJodaForm(QMainWindow):
             ext = os.path.splitext(filepath)[1].lower() or ".jpg"
             dest_path = os.path.join(PHOTOS_DIR, f"photo_{timestamp}{ext}")
             shutil.copy(filepath, dest_path)
-            self.set_photo(dest_path, context=context, upload_to_drive=True)
         except Exception as e:
-            QMessageBox.critical(self, "File Error", f"Could not load photo: {e}")
-        finally:
             self._set_busy(False)
+            QMessageBox.critical(self, "File Error", f"Could not load photo: {e}")
+            return
+        self.set_photo(dest_path, context=context, upload_to_drive=True)
+        self._set_busy(False)
 
     def browse_drive_photo(self, context="add"):
         """Lets the user pick an existing photo already stored in the Drive folder."""
@@ -1643,10 +1663,10 @@ class SevakJodaForm(QMainWindow):
         try:
             files = drive_helper.list_photos()
         except RuntimeError as e:
+            self._set_busy(False)
             QMessageBox.critical(self, LABELS["error_title"][idx], str(e))
             return
-        finally:
-            self._set_busy(False)
+        self._set_busy(False)
 
         dialog = QDialog(self)
         dialog.setWindowTitle(LABELS["drive_picker_title"][idx])
@@ -1689,9 +1709,10 @@ class SevakJodaForm(QMainWindow):
             setattr(self, f"{prefix}photo_drive_id", file_id)
             setattr(self, f"{prefix}photo_drive_link", f"https://drive.google.com/file/d/{file_id}/view")
         except RuntimeError as e:
-            QMessageBox.critical(self, LABELS["error_title"][idx], str(e))
-        finally:
             self._set_busy(False)
+            QMessageBox.critical(self, LABELS["error_title"][idx], str(e))
+            return
+        self._set_busy(False)
 
     def set_photo(self, filepath, context="add", upload_to_drive=False):
         idx = 0 if self.lang == "en" else 1
@@ -1713,6 +1734,7 @@ class SevakJodaForm(QMainWindow):
                 setattr(self, f"{prefix}photo_drive_id", file_id)
                 setattr(self, f"{prefix}photo_drive_link", link)
             except RuntimeError as e:
+                self._set_busy(False)
                 QMessageBox.warning(
                     self, LABELS["error_title"][idx], f'{LABELS["drive_upload_failed"][idx]}: {e}'
                 )
@@ -1768,12 +1790,13 @@ class SevakJodaForm(QMainWindow):
                 if col_i is not None:
                     row[col_i] = value
             sheet.append_row(row)
-            QMessageBox.information(self, LABELS["success_title"][idx], LABELS["success_body"][idx])
-            self.clear_form()
         except Exception as e:
-            QMessageBox.critical(self, LABELS["error_title"][idx], f"Failed to save: {e}")
-        finally:
             self._set_busy(False)
+            QMessageBox.critical(self, LABELS["error_title"][idx], f"Failed to save: {e}")
+            return
+        self._set_busy(False)
+        QMessageBox.information(self, LABELS["success_title"][idx], LABELS["success_body"][idx])
+        self.clear_form()
 
     def clear_form(self):
         for field in [self.card_id, self.first_name_en, self.middle_name_en, self.last_name_en, self.dob,
@@ -1803,27 +1826,28 @@ class SevakJodaForm(QMainWindow):
 
         self._set_busy(True, LABELS["status_loading"][idx])
         try:
-            try:
-                sheet = get_sheet(DETAILS_SHEET_NAME)
-                values = sheet.get_all_values()
-            except Exception as e:
-                QMessageBox.critical(self, LABELS["error_title"][idx], f"Could not load member: {e}")
-                return
-
-            if not values:
-                QMessageBox.warning(self, LABELS["no_member_found_title"][idx], LABELS["no_member_found_body"][idx])
-                return
-            header_map = get_header_map(sheet)
-            card_id_col = header_map.get(DETAILS_FIELDS["card_id"])
-
-            for row_number, row in enumerate(values[1:], start=2):
-                if card_id_col is not None and card_id_col < len(row) and row[card_id_col].strip() == card_id:
-                    self._populate_edit_fields(row_number, row, header_map)
-                    return
-
-            QMessageBox.warning(self, LABELS["no_member_found_title"][idx], LABELS["no_member_found_body"][idx])
-        finally:
+            sheet = get_sheet(DETAILS_SHEET_NAME)
+            values = sheet.get_all_values()
+        except Exception as e:
             self._set_busy(False)
+            QMessageBox.critical(self, LABELS["error_title"][idx], f"Could not load member: {e}")
+            return
+
+        if not values:
+            self._set_busy(False)
+            QMessageBox.warning(self, LABELS["no_member_found_title"][idx], LABELS["no_member_found_body"][idx])
+            return
+        header_map = get_header_map(sheet)
+        card_id_col = header_map.get(DETAILS_FIELDS["card_id"])
+
+        for row_number, row in enumerate(values[1:], start=2):
+            if card_id_col is not None and card_id_col < len(row) and row[card_id_col].strip() == card_id:
+                self._populate_edit_fields(row_number, row, header_map)
+                self._set_busy(False)
+                return
+
+        self._set_busy(False)
+        QMessageBox.warning(self, LABELS["no_member_found_title"][idx], LABELS["no_member_found_body"][idx])
 
     def _populate_edit_fields(self, row_number, row, header_map):
         idx = 0 if self.lang == "en" else 1
@@ -1935,11 +1959,12 @@ class SevakJodaForm(QMainWindow):
                     })
             if batch_data:
                 sheet.batch_update(batch_data)
-            QMessageBox.information(self, LABELS["success_title"][idx], LABELS["update_success_body"][idx])
         except Exception as e:
-            QMessageBox.critical(self, LABELS["error_title"][idx], f"Failed to update: {e}")
-        finally:
             self._set_busy(False)
+            QMessageBox.critical(self, LABELS["error_title"][idx], f"Failed to update: {e}")
+            return
+        self._set_busy(False)
+        QMessageBox.information(self, LABELS["success_title"][idx], LABELS["update_success_body"][idx])
 
 
 if __name__ == "__main__":

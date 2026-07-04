@@ -1862,19 +1862,31 @@ class SevakJodaForm(QMainWindow):
         lines = [full_name]
 
         address_mr = (record.get("address_mr", "") or "").strip()
+        wrapped_address = []
         if address_mr:
             if font_name and font_size and max_width:
-                lines.extend(self._wrap_address_last_two_words(address_mr, font_name, font_size, max_width))
+                wrapped_address = self._wrap_address_last_two_words(address_mr, font_name, font_size, max_width)
             else:
-                lines.append(address_mr)
+                wrapped_address = [address_mr]
+            lines.extend(wrapped_address)
+        last_address_line_index = len(lines) - 1 if wrapped_address else None
 
         mukkam_post = self._build_mukkam_post_line(record.get("mukkam_mr", ""), record.get("post_mr", ""))
         if mukkam_post:
             lines.append(mukkam_post)
 
-        taluka_jilha = self._build_taluka_jilha_line(record.get("taluka_mr", ""), record.get("jilha_mr", ""))
-        if taluka_jilha:
-            lines.append(taluka_jilha)
+        taluka = (record.get("taluka_mr", "") or "").strip()
+        jilha = (record.get("jilha_mr", "") or "").strip()
+        if len(wrapped_address) > 1 and jilha:
+            # address already spilled onto a 2nd+ line - fold जि. <jilha>
+            # into that line instead of giving it its own separate line
+            lines[last_address_line_index] = f"{lines[last_address_line_index]} जि. {jilha}".strip()
+            if taluka:
+                lines.append(f"ता. {taluka}")
+        else:
+            taluka_jilha = self._build_taluka_jilha_line(taluka, jilha)
+            if taluka_jilha:
+                lines.append(taluka_jilha)
 
         state_pincode = self._build_state_pincode_line(record.get("state_mr", ""), record.get("pincode", ""))
         if state_pincode:

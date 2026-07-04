@@ -191,6 +191,15 @@ LABELS = {
     "import_no_card_id_body": ("Please map a column to Card Id before importing.",
                                "आयात करण्यापूर्वी कृपया कार्ड आयडीशी एक स्तंभ जुळवा."),
     "(none)": ("(none)", "(काहीही नाही)"),
+    "btn_bulk_translate": ("🌐 Translate All Missing Marathi", "🌐 उर्वरित सर्व मराठी भाषांतर करा"),
+    "bulk_translate_confirm_title": ("Translate All?", "सर्व भाषांतर करायचे का?"),
+    "bulk_translate_confirm_body": (
+        "This scans every member in Sevak Details and fills in any blank "
+        "Marathi field from its English value. Existing Marathi text is left "
+        "untouched. Continue?",
+        "हे Sevak Details मधील प्रत्येक सेवक तपासून रिकाम्या मराठी फील्डमध्ये "
+        "इंग्रजी मजकुरावरून भाषांतर भरेल. आधीपासून असलेला मराठी मजकूर तसाच राहील. पुढे जायचे का?",
+    ),
 
 }
 
@@ -316,6 +325,60 @@ class TranslateWorker(QThread):
             self.failed.emit(str(e))
             return
         self.finished_ok.emit(results)
+
+
+class BulkTranslateWorker(QThread):
+    """Scans the whole Sevak Details sheet for rows where an English field
+    is filled in but its Marathi counterpart is blank, translates just
+    those, and writes them all back in one batch update - so existing
+    records typed in manually don't need to be opened one by one."""
+    progress = pyqtSignal(int, int)
+    finished_ok = pyqtSignal(int)
+    failed = pyqtSignal(str)
+
+    EN_TO_MR_PAIRS = [
+        ("first_en", "first_mr"), ("middle_en", "middle_mr"), ("last_en", "last_mr"),
+        ("address_en", "address_mr"), ("mukkam_en", "mukkam_mr"), ("post_en", "post_mr"),
+        ("taluka_en", "taluka_mr"), ("district_en", "jilha_mr"), ("state_en", "state_mr"),
+    ]
+
+    def run(self):
+        try:
+            sheet = get_sheet(DETAILS_SHEET_NAME)
+            values = sheet.get_all_values()
+            if not values or len(values) < 2:
+                self.finished_ok.emit(0)
+                return
+
+            header_map = get_header_map(sheet)
+            data_rows = values[1:]
+            total = len(data_rows)
+            batch_data = []
+            updated = 0
+
+            for i, row in enumerate(data_rows):
+                self.progress.emit(i + 1, total)
+                record = row_to_details_record(row, header_map)
+                row_number = i + 2
+                for en_key, mr_key in self.EN_TO_MR_PAIRS:
+                    en_val = record.get(en_key, "")
+                    mr_val = record.get(mr_key, "")
+                    if en_val and not mr_val:
+                        translated = translate_to_marathi(en_val)
+                        if translated:
+                            col = details_col_index(header_map, mr_key)
+                            if col is not None:
+                                batch_data.append({
+                                    "range": gspread.utils.rowcol_to_a1(row_number, col),
+                                    "values": [[translated]],
+                                })
+                                updated += 1
+
+            if batch_data:
+                sheet.batch_update(batch_data)
+            self.finished_ok.emit(updated)
+        except Exception as e:
+            self.failed.emit(str(e))
 
 
 class SevakJodaForm(QMainWindow):
@@ -554,6 +617,7 @@ class SevakJodaForm(QMainWindow):
         self.import_mapping_label.setText(t("lbl_column_mapping"))
         self.import_preview_btn.setText(t("btn_preview_import"))
         self.import_all_btn.setText(t("btn_import_all"))
+        self.bulk_translate_btn.setText(t("btn_bulk_translate"))
         self._refresh_import_field_labels()
 
     # ---------- Add Member page ----------
@@ -1361,6 +1425,17 @@ class SevakJodaForm(QMainWindow):
         btn_row.addWidget(self.import_all_btn)
         layout.addLayout(btn_row)
 
+        separator = QFrame()
+        separator.setFrameShape(QFrame.HLine)
+        layout.addWidget(separator)
+
+        self.bulk_translate_btn = QPushButton()
+        self.bulk_translate_btn.setStyleSheet(
+            "font-size: 14px; padding: 10px; background-color: #16a085; color: white;"
+        )
+        self.bulk_translate_btn.clicked.connect(self.start_bulk_translate)
+        layout.addWidget(self.bulk_translate_btn)
+
         self.import_preview_table = QTableWidget()
         layout.addWidget(self.import_preview_table, 1)
 
@@ -1542,6 +1617,40 @@ class SevakJodaForm(QMainWindow):
             self, LABELS["success_title"][idx],
             f"{imported} {'records imported successfully!' if idx == 0 else 'नोंदी यशस्वीरित्या आयात झाल्या!'}"
         )
+
+    def start_bulk_translate(self):
+        idx = 0 if self.lang == "en" else 1
+        confirm = QMessageBox.question(
+            self, LABELS["bulk_translate_confirm_title"][idx], LABELS["bulk_translate_confirm_body"][idx],
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
+        )
+        if confirm != QMessageBox.Yes:
+            return
+
+        self._set_busy(True, LABELS["status_translating"][idx])
+        self._bulk_translate_worker = BulkTranslateWorker()
+        self._bulk_translate_worker.progress.connect(self._on_bulk_translate_progress)
+        self._bulk_translate_worker.finished_ok.connect(self._on_bulk_translate_finished)
+        self._bulk_translate_worker.failed.connect(self._on_bulk_translate_failed)
+        self._bulk_translate_worker.start()
+
+    def _on_bulk_translate_progress(self, current, total):
+        idx = 0 if self.lang == "en" else 1
+        self.statusBar().showMessage(f"{LABELS['status_translating'][idx]} ({current}/{total})")
+
+    def _on_bulk_translate_finished(self, updated_count):
+        idx = 0 if self.lang == "en" else 1
+        self._set_busy(False)
+        body = (
+            f"{updated_count} Marathi field(s) translated and updated!" if idx == 0
+            else f"{updated_count} मराठी फील्ड भाषांतरित करून अद्यतनित केले!"
+        )
+        QMessageBox.information(self, LABELS["success_title"][idx], body)
+
+    def _on_bulk_translate_failed(self, message):
+        idx = 0 if self.lang == "en" else 1
+        self._set_busy(False)
+        QMessageBox.critical(self, LABELS["error_title"][idx], message)
 
     def fetch_full_details_map(self):
         """Reads the Sevak Details sheet into a dict keyed by card_id, with

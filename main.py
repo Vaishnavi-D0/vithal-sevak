@@ -90,6 +90,8 @@ LABELS = {
     "lbl_last_en": ("Last Name (English):", "आडनाव (इंग्रजी):"),
     "lbl_dob": ("Date of Birth:", "जन्मतारीख:"),
     "lbl_phone": ("Phone Number:", "फोन नंबर:"),
+    "lbl_landline": ("Landline:", "लँडलाइन:"),
+    "lbl_phone_sec": ("Phone Number (Secondary):", "फोन नंबर (दुसरा):"),
     "lbl_address_en": ("Address (English):", "पत्ता (इंग्रजी):"),
     "lbl_pincode": ("Pincode:", "पिनकोड:"),
     "lbl_first_mr": ("पहिले नाव (Marathi):", "पहिले नाव (मराठी):"),
@@ -258,6 +260,8 @@ DETAILS_FIELDS = {
     "jilha_mr": "jilha_mr",
     "state_mr": "state_mr",
     "photo": "photo_path",
+    "landline": "landline",
+    "phone_sec": "phone_number_sec",
 }
 
 
@@ -703,6 +707,8 @@ class SevakJodaForm(QMainWindow):
         self.last_name_en = QLineEdit(); self.last_name_en.setFont(eng_font)
         self.dob = QLineEdit(); self.dob.setFont(eng_font)
         self.phone_number = QLineEdit(); self.phone_number.setFont(eng_font)
+        self.phone_number_sec = QLineEdit(); self.phone_number_sec.setFont(eng_font)
+        self.landline = QLineEdit(); self.landline.setFont(eng_font)
         self.address_en = QTextEdit(); self.address_en.setFont(eng_font)
         self.address_en.setMinimumHeight(90)
         self.mukkam_en = QLineEdit(); self.mukkam_en.setFont(eng_font)
@@ -718,6 +724,8 @@ class SevakJodaForm(QMainWindow):
         add_row("lbl_last_en", self.last_name_en)
         add_row("lbl_dob", self.dob)
         add_row("lbl_phone", self.phone_number)
+        add_row("lbl_phone_sec", self.phone_number_sec)
+        add_row("lbl_landline", self.landline)
         add_row("lbl_address_en", self.address_en)
         add_row("lbl_mukkam_en", self.mukkam_en)
         add_row("lbl_post_en", self.post_en)
@@ -854,6 +862,8 @@ class SevakJodaForm(QMainWindow):
         self.edit_last_name_en = QLineEdit(); self.edit_last_name_en.setFont(eng_font)
         self.edit_dob = QLineEdit(); self.edit_dob.setFont(eng_font)
         self.edit_phone_number = QLineEdit(); self.edit_phone_number.setFont(eng_font)
+        self.edit_phone_number_sec = QLineEdit(); self.edit_phone_number_sec.setFont(eng_font)
+        self.edit_landline = QLineEdit(); self.edit_landline.setFont(eng_font)
         self.edit_address_en = QTextEdit(); self.edit_address_en.setFont(eng_font)
         self.edit_address_en.setMinimumHeight(90)
         self.edit_mukkam_en = QLineEdit(); self.edit_mukkam_en.setFont(eng_font)
@@ -869,6 +879,8 @@ class SevakJodaForm(QMainWindow):
         add_row("lbl_last_en", self.edit_last_name_en)
         add_row("lbl_dob", self.edit_dob)
         add_row("lbl_phone", self.edit_phone_number)
+        add_row("lbl_phone_sec", self.edit_phone_number_sec)
+        add_row("lbl_landline", self.edit_landline)
         add_row("lbl_address_en", self.edit_address_en)
         add_row("lbl_mukkam_en", self.edit_mukkam_en)
         add_row("lbl_post_en", self.edit_post_en)
@@ -1413,6 +1425,7 @@ class SevakJodaForm(QMainWindow):
     IMPORT_FIELDS = [
         ("card_id", "lbl_card_id"), ("first_en", "lbl_first_en"), ("middle_en", "lbl_middle_en"),
         ("last_en", "lbl_last_en"), ("dob", "lbl_dob"), ("phone", "lbl_phone"),
+        ("phone_sec", "lbl_phone_sec"), ("landline", "lbl_landline"),
         ("address_en", "lbl_address_en"), ("mukkam_en", "lbl_mukkam_en"), ("post_en", "lbl_post_en"),
         ("taluka_en", "lbl_taluka_en"), ("district_en", "lbl_district_en"), ("state_en", "lbl_state_en"),
         ("pincode", "lbl_pincode"),
@@ -1869,7 +1882,11 @@ class SevakJodaForm(QMainWindow):
 
         phone = (phone or "").strip()
         if phone:
-            lines.append(f"मोबाईल: {phone}")
+            phone_sec = (record.get("phone_sec", "") or "").strip()
+            mobile_line = f"मोबाईल: {phone}"
+            if phone_sec:
+                mobile_line += f" / {phone_sec}"
+            lines.append(mobile_line)
         return lines
 
     def generate_wari_photo_list_pdf(self):
@@ -2265,6 +2282,8 @@ class SevakJodaForm(QMainWindow):
                 "last_en": self.last_name_en.text().strip(),
                 "dob": self.dob.text().strip(),
                 "phone": _to_number(self.phone_number.text().strip()),
+                "phone_sec": _to_number(self.phone_number_sec.text().strip()),
+                "landline": _to_number(self.landline.text().strip()),
                 "address_en": _get_text(self.address_en).strip(),
                 "mukkam_en": self.mukkam_en.text().strip(),
                 "post_en": self.post_en.text().strip(),
@@ -2303,7 +2322,8 @@ class SevakJodaForm(QMainWindow):
 
     def clear_form(self):
         for field in [self.card_id, self.first_name_en, self.middle_name_en, self.last_name_en, self.dob,
-                      self.phone_number, self.address_en, self.mukkam_en, self.post_en, self.taluka_en,
+                      self.phone_number, self.phone_number_sec, self.landline,
+                      self.address_en, self.mukkam_en, self.post_en, self.taluka_en,
                       self.district_en, self.state_en, self.pincode, self.first_name_mr,
                       self.middle_name_mr, self.last_name_mr, self.address_mr, self.mukkam_mr,
                       self.post_mr, self.taluka_mr, self.jilha_mr, self.state_mr]:
@@ -2363,6 +2383,8 @@ class SevakJodaForm(QMainWindow):
         self.edit_last_name_en.setText(record["last_en"])
         self.edit_dob.setText(record["dob"])
         self.edit_phone_number.setText(record["phone"])
+        self.edit_phone_number_sec.setText(record["phone_sec"])
+        self.edit_landline.setText(record["landline"])
         _set_text(self.edit_address_en, record["address_en"])
         self.edit_mukkam_en.setText(record["mukkam_en"])
         self.edit_post_en.setText(record["post_en"])
@@ -2426,6 +2448,8 @@ class SevakJodaForm(QMainWindow):
                 "last_en": self.edit_last_name_en.text().strip(),
                 "dob": self.edit_dob.text().strip(),
                 "phone": _to_number(self.edit_phone_number.text().strip()),
+                "phone_sec": _to_number(self.edit_phone_number_sec.text().strip()),
+                "landline": _to_number(self.edit_landline.text().strip()),
                 "address_en": _get_text(self.edit_address_en).strip(),
                 "mukkam_en": self.edit_mukkam_en.text().strip(),
                 "post_en": self.edit_post_en.text().strip(),

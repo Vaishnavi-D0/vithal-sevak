@@ -17,21 +17,50 @@ os.makedirs(PHOTOS_DIR, exist_ok=True)
 
 SCAN_DPI = 1200
 FINAL_LONG_EDGE_PX = 1200
-# Anything darker than this (out of 255, grayscale) is considered part of
-# the actual photo rather than the scanner bed's white/light background.
-BACKGROUND_THRESHOLD = 235
+# How far (out of 255, grayscale) a pixel must differ from the detected
+# background shade to be considered part of the actual photo.
+BACKGROUND_DIFF_THRESHOLD = 25
 # Small margin (px, at SCAN_DPI) kept around the detected photo edges so
 # auto-crop doesn't clip into the picture.
 CROP_PADDING = 15
+# Width (px) of the border strip sampled to figure out what the scanner
+# bed/lid background actually looks like - it isn't always white; many
+# scanners (e.g. most Epson flatbeds) have a black or dark grey lid.
+BORDER_SAMPLE_PX = 40
+
+
+def _detect_background_shade(gray):
+    """Estimates the scanner bed/lid background's grayscale shade by
+    sampling a strip along all 4 edges of the scan (the photo is assumed
+    to not touch the very edges of the bed) and taking the median."""
+    w, h = gray.size
+    strip = min(BORDER_SAMPLE_PX, w // 4 or 1, h // 4 or 1)
+    if strip <= 0:
+        return 255
+
+    samples = []
+    top_strip = gray.crop((0, 0, w, strip))
+    bottom_strip = gray.crop((0, h - strip, w, h))
+    left_strip = gray.crop((0, 0, strip, h))
+    right_strip = gray.crop((w - strip, 0, w, h))
+    for region in (top_strip, bottom_strip, left_strip, right_strip):
+        samples.extend(region.getdata())
+
+    if not samples:
+        return 255
+    samples.sort()
+    return samples[len(samples) // 2]  # median
 
 
 def _autocrop_to_photo(img):
     """Finds the bounding box of the actual photo content on the scanned
-    A4 page (i.e. everything that isn't blank scanner-bed background) and
-    crops to it, with a small padding margin. Falls back to the full image
-    if no distinct content region is found."""
+    A4 page (i.e. everything that differs from the scanner bed/lid
+    background, whether that background is light or dark) and crops to
+    it, with a small padding margin. Falls back to the full image if no
+    distinct content region is found."""
     gray = img.convert("L")
-    binary = gray.point(lambda p: 255 if p < BACKGROUND_THRESHOLD else 0)
+    background_shade = _detect_background_shade(gray)
+    binary = gray.point(lambda p: 255 if abs(p - background_shade) > BACKGROUND_DIFF_THRESHOLD else 0)
     bbox = binary.getbbox()
     if not bbox:
         return img

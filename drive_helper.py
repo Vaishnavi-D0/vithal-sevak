@@ -2,28 +2,86 @@
 drive_helper.py
 Uploads captured/selected member photos to a shared Google Drive folder,
 and lets the app browse/download photos already sitting in that folder.
-Uses the same service account credentials as the Sheets integration.
+
+Uses a real user OAuth login (not the service account used for Sheets)
+because service accounts have ZERO personal storage quota - uploading a
+new file with one fails with a 403 "Service Accounts do not have storage
+quota" error, even into a folder someone else shared with it, unless that
+folder lives in a Google Workspace Shared Drive. For a regular/free Gmail
+account there is no Shared Drive option, so instead we sign in once as the
+actual Google account (a browser window opens for that), and the uploaded
+files then count against that account's normal 15GB quota like any file
+you'd upload by hand.
+
+One-time setup required (see README section in this docstring):
+1. In Google Cloud Console (same project as the service account, or any
+   project), create an OAuth Client ID of type "Desktop app".
+2. Download its JSON and save it next to this file as
+   "oauth_client_secret.json".
+3. Run the app and do any Drive action (scan/upload/browse a photo) - a
+   browser window opens once for you to sign in and grant access. After
+   that, a refresh token is cached in "drive_oauth_token.json" so you
+   won't need to sign in again.
 """
 
 import io
 import os
 
-from google.oauth2.service_account import Credentials
+from google.auth.transport.requests import Request
+from google.oauth2.credentials import Credentials as UserCredentials
+from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
 
 from network_utils import with_retry
 
-CREDENTIALS_FILE = "credentials.json"
 DRIVE_FOLDER_ID = "1X6OtZxVXiUVk7LgGtzVPFvvoTi1dtTRk"
 
+OAUTH_CLIENT_SECRET_FILE = "oauth_client_secret.json"
+OAUTH_TOKEN_FILE = "drive_oauth_token.json"
 SCOPES = ["https://www.googleapis.com/auth/drive"]
 
 _service = None
 
 
+def _get_user_credentials():
+    """Loads cached OAuth credentials (refreshing if needed), or runs the
+    one-time browser sign-in flow if none are cached yet."""
+    creds = None
+    if os.path.exists(OAUTH_TOKEN_FILE):
+        try:
+            creds = UserCredentials.from_authorized_user_file(OAUTH_TOKEN_FILE, SCOPES)
+        except Exception:
+            creds = None
+
+    if creds and creds.valid:
+        return creds
+
+    if creds and creds.expired and creds.refresh_token:
+        try:
+            creds.refresh(Request())
+            with open(OAUTH_TOKEN_FILE, "w") as f:
+                f.write(creds.to_json())
+            return creds
+        except Exception:
+            pass  # refresh failed (e.g. revoked access) - fall through to a fresh sign-in
+
+    if not os.path.exists(OAUTH_CLIENT_SECRET_FILE):
+        raise RuntimeError(
+            f"Google Drive isn't connected yet: '{OAUTH_CLIENT_SECRET_FILE}' is missing. "
+            "Create a Desktop-app OAuth Client ID in Google Cloud Console, download its "
+            f"JSON, and save it next to the app as '{OAUTH_CLIENT_SECRET_FILE}'."
+        )
+
+    flow = InstalledAppFlow.from_client_secrets_file(OAUTH_CLIENT_SECRET_FILE, SCOPES)
+    creds = flow.run_local_server(port=0)
+    with open(OAUTH_TOKEN_FILE, "w") as f:
+        f.write(creds.to_json())
+    return creds
+
+
 def _build_service():
-    creds = Credentials.from_service_account_file(CREDENTIALS_FILE, scopes=SCOPES)
+    creds = _get_user_credentials()
     return build("drive", "v3", credentials=creds)
 
 

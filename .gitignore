@@ -1,4 +1,6 @@
 credentials.json
+oauth_client_secret.json
+drive_oauth_token.json
 my_env/
 build_env/
 __pycache__/

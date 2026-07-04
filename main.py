@@ -166,6 +166,9 @@ LABELS = {
                               "निवडलेल्या वारी आणि वर्षासाठी कोणतेही उपस्थित सेवक सापडले नाहीत."),
     "pdf_save_dialog_title": ("Save Wari Photo List PDF", "वारी फोटो यादी पीडीएफ जतन करा"),
     "pdf_success_body": ("PDF created successfully!", "पीडीएफ यशस्वीरित्या तयार झाली!"),
+    "nav_pass_photo": ("Create Pass Photo PDF", "पास फोटो पीडीएफ तयार करा"),
+    "btn_generate_pass_pdf": ("🖨 Generate Pass Photo PDF", "🖨 पास फोटो पीडीएफ तयार करा"),
+    "pass_pdf_save_dialog_title": ("Save Pass Photo PDF", "पास फोटो पीडीएफ जतन करा"),
 }
 
 
@@ -310,10 +313,12 @@ class SevakJodaForm(QMainWindow):
         self.edit_member_page = self._build_edit_member_page()
         self.vari_member_page = self._build_wari_attendees_page()
         self.photo_list_page = self._build_photo_list_page()
+        self.pass_photo_page = self._build_pass_photo_page()
         self.stack.addWidget(self.add_member_page)
         self.stack.addWidget(self.edit_member_page)
         self.stack.addWidget(self.vari_member_page)
         self.stack.addWidget(self.photo_list_page)
+        self.stack.addWidget(self.pass_photo_page)
         self.stack.currentChanged.connect(self.on_page_changed)
 
         root_layout.addWidget(self._build_sidebar())
@@ -372,6 +377,7 @@ class SevakJodaForm(QMainWindow):
             ("nav_edit_member", self.edit_member_page),
             ("nav_vari_member", self.vari_member_page),
             ("nav_photo_list", self.photo_list_page),
+            ("nav_pass_photo", self.pass_photo_page),
         ]
         for key, page in nav_defs:
             btn = QPushButton()
@@ -493,6 +499,11 @@ class SevakJodaForm(QMainWindow):
         self.photo_list_select_label.setText(t("lbl_wari_select"))
         self.photo_list_year_label.setText(t("lbl_wari_year"))
         self.photo_list_generate_btn.setText(t("btn_generate_pdf"))
+
+        self._refresh_pass_photo_wari_combo_labels()
+        self.pass_photo_select_label.setText(t("lbl_wari_select"))
+        self.pass_photo_year_label.setText(t("lbl_wari_year"))
+        self.pass_photo_generate_btn.setText(t("btn_generate_pass_pdf"))
 
     # ---------- Add Member page ----------
 
@@ -1050,6 +1061,165 @@ class SevakJodaForm(QMainWindow):
         for i, (en_name, mr_name) in enumerate(WARI_OPTIONS):
             self.photo_list_wari_combo.setItemText(i, en_name if idx == 0 else mr_name)
 
+    # ---------- Create Pass Photo PDF page ----------
+
+    def _build_pass_photo_page(self):
+        page = QWidget()
+        layout = QVBoxLayout()
+        page.setLayout(layout)
+
+        selector_form = QFormLayout()
+
+        self.pass_photo_wari_combo = QComboBox()
+        for en_name, mr_name in WARI_OPTIONS:
+            self.pass_photo_wari_combo.addItem(en_name, en_name)
+        self.pass_photo_select_label = QLabel()
+        selector_form.addRow(self.pass_photo_select_label, self.pass_photo_wari_combo)
+
+        self.pass_photo_year_spin = QSpinBox()
+        self.pass_photo_year_spin.setRange(2000, 2100)
+        self.pass_photo_year_spin.setValue(datetime.now().year)
+        self.pass_photo_year_label = QLabel()
+        selector_form.addRow(self.pass_photo_year_label, self.pass_photo_year_spin)
+
+        layout.addLayout(selector_form)
+
+        self.pass_photo_generate_btn = QPushButton()
+        self.pass_photo_generate_btn.setStyleSheet(
+            "font-size: 14px; padding: 10px; background-color: #4CAF50; color: white;"
+        )
+        self.pass_photo_generate_btn.clicked.connect(self.generate_pass_photo_pdf)
+        layout.addWidget(self.pass_photo_generate_btn)
+
+        layout.addStretch()
+
+        return page
+
+    def _refresh_pass_photo_wari_combo_labels(self):
+        idx = 0 if self.lang == "en" else 1
+        for i, (en_name, mr_name) in enumerate(WARI_OPTIONS):
+            self.pass_photo_wari_combo.setItemText(i, en_name if idx == 0 else mr_name)
+
+    def generate_pass_photo_pdf(self):
+        idx = 0 if self.lang == "en" else 1
+        wari_name = self.pass_photo_wari_combo.currentData()
+        wari_year = self.pass_photo_year_spin.value()
+
+        self._set_busy(True, LABELS["status_loading"][idx])
+        try:
+            try:
+                wari_sheet = get_sheet(WARI_SHEET_NAME)
+                wari_values = wari_sheet.get_all_values()
+            except Exception as e:
+                QMessageBox.critical(self, LABELS["error_title"][idx], f"Could not read Wari Attendees: {e}")
+                return
+
+            attendee_card_ids = [
+                row[2] for row in wari_values[1:]
+                if len(row) >= 3 and row[0] == wari_name and str(row[1]) == str(wari_year) and row[2].strip()
+            ]
+            if not attendee_card_ids:
+                QMessageBox.warning(self, LABELS["pdf_no_attendees_title"][idx], LABELS["pdf_no_attendees_body"][idx])
+                return
+
+            try:
+                details_map = self.fetch_full_details_map()
+            except Exception as e:
+                QMessageBox.critical(self, LABELS["error_title"][idx], f"Could not read Sevak Details: {e}")
+                return
+        finally:
+            self._set_busy(False)
+
+        default_name = f"Wari_{wari_name}_{wari_year}_PassPhotos.pdf"
+        save_path, _ = QFileDialog.getSaveFileName(
+            self, LABELS["pass_pdf_save_dialog_title"][idx], default_name, "PDF Files (*.pdf)"
+        )
+        if not save_path:
+            return
+
+        self._set_busy(True, LABELS["status_generating_pdf"][idx])
+        try:
+            self._render_pass_photo_pdf(save_path, attendee_card_ids, details_map)
+            QMessageBox.information(self, LABELS["success_title"][idx], LABELS["pdf_success_body"][idx])
+        except Exception as e:
+            QMessageBox.critical(self, LABELS["error_title"][idx], f"Failed to create PDF: {e}")
+        finally:
+            self._set_busy(False)
+
+    def _fit_pass_photo_name(self, last_name, first_name, font_name, font_size, max_width):
+        """Returns "Last First" if it fits within max_width, otherwise
+        abbreviates the first name to its initial + a dot ("Last F.")."""
+        last_name = (last_name or "").strip()
+        first_name = (first_name or "").strip()
+        full = " ".join(filter(None, [last_name, first_name]))
+        if pdfmetrics.stringWidth(full, font_name, font_size) <= max_width or not first_name:
+            return full
+        abbreviated = " ".join(filter(None, [last_name, f"{first_name[0]}."]))
+        return abbreviated
+
+    def _render_pass_photo_pdf(self, save_path, card_ids, details_map):
+        """Renders a grid of passport-style photos (4 per row, 5 rows per
+        page = 20/page) with the member's name below each, for printing on
+        glossy paper and cutting out to stick on an ID card."""
+        PHOTO_W = 2.8 * cm
+        PHOTO_H = 3 * cm
+        NAME_H = 0.6 * cm
+        CELL_W = PHOTO_W
+        CELL_H = PHOTO_H + NAME_H
+        COLS = 4
+        ROWS_PER_PAGE = 5
+        PER_PAGE = COLS * ROWS_PER_PAGE
+        NAME_FONT_SIZE = 8
+
+        page_width, page_height = A4
+        grid_w = CELL_W * COLS
+        grid_h = CELL_H * ROWS_PER_PAGE
+        margin_left = (page_width - grid_w) / 2
+        margin_top = (page_height - grid_h) / 2
+
+        c = pdfcanvas.Canvas(save_path, pagesize=A4)
+        photo_cache = {}
+
+        for i, card_id in enumerate(card_ids):
+            record = details_map.get(card_id, {})
+            pos_in_page = i % PER_PAGE
+            if i > 0 and pos_in_page == 0:
+                c.showPage()
+
+            row = pos_in_page // COLS
+            col = pos_in_page % COLS
+            x_left = margin_left + col * CELL_W
+            y_top = page_height - margin_top - row * CELL_H
+            y_bottom = y_top - CELL_H
+            photo_y_bottom = y_top - PHOTO_H
+
+            # border around the whole cell (photo + name)
+            c.rect(x_left, y_bottom, CELL_W, CELL_H)
+            # divider between photo and name area
+            c.line(x_left, photo_y_bottom, x_left + CELL_W, photo_y_bottom)
+
+            photo_path = self._resolve_photo_for_pdf(record.get("photo", ""), photo_cache)
+            if photo_path:
+                try:
+                    c.drawImage(
+                        photo_path, x_left, photo_y_bottom, width=PHOTO_W, height=PHOTO_H,
+                        preserveAspectRatio=False, mask="auto",
+                    )
+                except Exception:
+                    pass
+
+            last_en = record.get("last_en", "") or record.get("last_mr", "")
+            first_en = record.get("first_en", "") or record.get("first_mr", "")
+            name_text = self._fit_pass_photo_name(
+                last_en, first_en, "Helvetica", NAME_FONT_SIZE, CELL_W - 0.1 * cm
+            )
+            c.setFont("Helvetica", NAME_FONT_SIZE)
+            c.drawCentredString(
+                x_left + CELL_W / 2, y_bottom + NAME_H / 2 - NAME_FONT_SIZE / 3, name_text
+            )
+
+        c.save()
+
     def fetch_full_details_map(self):
         """Reads the Sevak Details sheet into a dict keyed by card_id, with
         every field needed to render the Wari photo list."""
@@ -1188,7 +1358,9 @@ class SevakJodaForm(QMainWindow):
         if state_pincode:
             lines.append(state_pincode)
 
-        lines.append(phone)
+        phone = (phone or "").strip()
+        if phone:
+            lines.append(f"मोबाईल: {phone}")
         return lines
 
     def generate_wari_photo_list_pdf(self):
@@ -1278,7 +1450,7 @@ class SevakJodaForm(QMainWindow):
         page_width, page_height = A4
         c = pdfcanvas.Canvas(save_path, pagesize=A4)
         photo_cache = {}
-        FONT_SIZE = 8
+        FONT_SIZE = 9
         HEADER_FONT_SIZE = 8
 
         def new_page_header():
@@ -1328,7 +1500,7 @@ class SevakJodaForm(QMainWindow):
             )
             lines = self._build_photo_list_block_lines(full_name, record, record.get("phone", ""))
             text_x = x_left + COL1_W + 0.15 * cm
-            line_height = BLOCK_H / 6.2
+            line_height = BLOCK_H / max(6.0, len(lines) + 0.2)
             text_y = y_top - line_height * 0.8
             for line in lines:
                 self._draw_shaped_line(c, line, text_x, text_y, FONT_SIZE)

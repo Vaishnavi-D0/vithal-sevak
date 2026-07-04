@@ -20,14 +20,26 @@ hidden_imports = (
         "gspread",
         "deep_translator",
         "bs4",
+        "soupsieve",
         "PIL",
         "PIL._tkinter_finder",
+        # requests/urllib3's HTTPS stack - PyInstaller's import scanner can
+        # miss these since they're loaded dynamically, which otherwise
+        # surfaces as network calls silently failing/hanging in the frozen
+        # exe (e.g. the Translate button) with no obvious error on screen.
+        "certifi",
+        "charset_normalizer",
+        "idna",
+        "urllib3",
+        "_cffi_backend",
     ]
 )
 
 # googleapiclient ships static discovery documents as package data;
 # without these, Drive/Sheets API calls fail at runtime in the frozen exe.
-extra_datas = collect_data_files("googleapiclient")
+# certifi's CA bundle is needed too, or HTTPS requests (translation,
+# Sheets/Drive API, etc.) fail to verify TLS certificates in the frozen exe.
+extra_datas = collect_data_files("googleapiclient") + collect_data_files("certifi")
 
 a = Analysis(
     ["main.py"],

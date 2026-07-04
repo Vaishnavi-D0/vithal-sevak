@@ -25,7 +25,7 @@ from PyQt5.QtWidgets import (
     QListWidgetItem, QDialog
 )
 from PyQt5.QtGui import QFont, QPixmap, QDesktopServices
-from PyQt5.QtCore import Qt, QUrl
+from PyQt5.QtCore import Qt, QUrl, QThread, pyqtSignal
 
 import gspread
 from google.oauth2.service_account import Credentials
@@ -224,6 +224,27 @@ def _set_text(field, text):
 
 def _clear(field):
     field.clear()
+
+
+class TranslateWorker(QThread):
+    """Runs the (network-bound) translation calls off the UI thread, so a
+    slow/blocked connection can't freeze - or appear to crash - the app."""
+    finished_ok = pyqtSignal(dict)
+    failed = pyqtSignal(str)
+
+    def __init__(self, texts_by_index):
+        super().__init__()
+        self.texts_by_index = texts_by_index  # {pair_index: english_text}
+
+    def run(self):
+        results = {}
+        try:
+            for i, text in self.texts_by_index.items():
+                results[i] = translate_to_marathi(text)
+        except Exception as e:
+            self.failed.emit(str(e))
+            return
+        self.finished_ok.emit(results)
 
 
 class SevakJodaForm(QMainWindow):
@@ -1072,9 +1093,17 @@ class SevakJodaForm(QMainWindow):
             )
 
             # column 2: Marathi name / address / mukkam+post / taluka+jilha / state+pincode / phone
-            full_name = " ".join(filter(None, [
-                record.get("last_mr", ""), record.get("first_mr", ""), record.get("middle_mr", ""),
-            ])) or record.get("card_id", card_id)
+            # Falls back to the English name (then, only as a last resort,
+            # the raw card_id) if Marathi translation was never filled in.
+            full_name = (
+                " ".join(filter(None, [
+                    record.get("last_mr", ""), record.get("first_mr", ""), record.get("middle_mr", ""),
+                ]))
+                or " ".join(filter(None, [
+                    record.get("last_en", ""), record.get("first_en", ""), record.get("middle_en", ""),
+                ]))
+                or record.get("card_id", card_id)
+            )
             lines = self._build_photo_list_block_lines(full_name, record, record.get("phone", ""))
             text_x = x_left + COL1_W + 0.15 * cm
             line_height = BLOCK_H / 6.2
@@ -1122,15 +1151,45 @@ class SevakJodaForm(QMainWindow):
     def translate_fields(self, pairs=None):
         """Translates every English name/address field into Marathi,
         always overwriting whatever is currently in the Marathi field.
-        Defaults to the Add Member page's fields if no pairs are given."""
+        Defaults to the Add Member page's fields if no pairs are given.
+        Runs the network calls on a background thread so a slow/blocked
+        connection can't freeze the UI."""
         pairs = pairs if pairs is not None else self.translation_pairs
-        try:
-            for en_field, mr_field in pairs:
-                en_text = _get_text(en_field).strip()
-                if en_text:
-                    _set_text(mr_field, translate_to_marathi(en_text))
-        except RuntimeError as e:
-            QMessageBox.warning(self, "Translation Error", str(e))
+        texts_by_index = {}
+        for i, (en_field, mr_field) in enumerate(pairs):
+            en_text = _get_text(en_field).strip()
+            if en_text:
+                texts_by_index[i] = en_text
+        if not texts_by_index:
+            return
+
+        self._active_translate_pairs = pairs
+        self._set_translate_buttons_enabled(False)
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+
+        self._translate_worker = TranslateWorker(texts_by_index)
+        self._translate_worker.finished_ok.connect(self._on_translate_finished)
+        self._translate_worker.failed.connect(self._on_translate_failed)
+        self._translate_worker.start()
+
+    def _set_translate_buttons_enabled(self, enabled):
+        if hasattr(self, "translate_btn"):
+            self.translate_btn.setEnabled(enabled)
+        if hasattr(self, "edit_translate_btn"):
+            self.edit_translate_btn.setEnabled(enabled)
+
+    def _on_translate_finished(self, results):
+        QApplication.restoreOverrideCursor()
+        self._set_translate_buttons_enabled(True)
+        pairs = self._active_translate_pairs
+        for i, translated in results.items():
+            _, mr_field = pairs[i]
+            _set_text(mr_field, translated)
+
+    def _on_translate_failed(self, message):
+        QApplication.restoreOverrideCursor()
+        self._set_translate_buttons_enabled(True)
+        QMessageBox.warning(self, "Translation Error", message)
 
     def run_scan(self, context="add"):
         """Triggers the WIA scanner dialog and captures the photo."""

@@ -1972,9 +1972,6 @@ class SevakJodaForm(QMainWindow):
         # a touch taller than 3cm to give the bigger 12pt font breathing
         # room, while every block still shares this same fixed size
         BLOCK_H = 3.3 * cm
-        # tiny gap between rows so adjacent blocks don't look like one
-        # unbroken grid
-        ROW_GAP = 0.15 * cm
         HEADER_H = 0.4 * cm
         MEMBERS_PER_PAGE = 7
         MARGIN_TOP = 1.5 * cm
@@ -2003,7 +2000,7 @@ class SevakJodaForm(QMainWindow):
                 c.showPage()
                 new_page_header()
 
-            y_top = page_height - MARGIN_TOP - HEADER_H - pos_in_page * (BLOCK_H + ROW_GAP)
+            y_top = page_height - MARGIN_TOP - HEADER_H - pos_in_page * BLOCK_H
             y_bottom = y_top - BLOCK_H
             x_left = MARGIN_LEFT
 

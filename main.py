@@ -22,7 +22,7 @@ from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QFormLayout, QLineEdit, QTextEdit, QPushButton, QLabel, QMessageBox,
     QFileDialog, QStackedWidget, QFrame, QComboBox, QSpinBox, QListWidget,
-    QListWidgetItem, QDialog
+    QListWidgetItem, QDialog, QScrollArea
 )
 from PyQt5.QtGui import QFont, QPixmap, QDesktopServices
 from PyQt5.QtCore import Qt, QUrl, QThread, pyqtSignal
@@ -275,7 +275,7 @@ class SevakJodaForm(QMainWindow):
         self.edit_photo_drive_link = None
         self.edit_original_photo_value = None
         self.edit_row_number = None
-        self.resize(820, 680)
+        self.resize(1100, 700)
 
         central = QWidget()
         self.setCentralWidget(central)
@@ -453,13 +453,24 @@ class SevakJodaForm(QMainWindow):
 
     def _build_add_member_page(self):
         page = QWidget()
-        main_layout = QVBoxLayout()
-        page.setLayout(main_layout)
+        outer_layout = QVBoxLayout()
+        page.setLayout(outer_layout)
 
-        form = QFormLayout()
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll_content = QWidget()
+        scroll.setWidget(scroll_content)
+        main_layout = QVBoxLayout()
+        scroll_content.setLayout(main_layout)
+        outer_layout.addWidget(scroll)
+
+        # English fields on the left, Marathi/other fields on the right,
+        # so the form doesn't overflow vertically off the screen.
+        form_en = QFormLayout()
+        form_mr = QFormLayout()
         self.form_labels = {}
 
-        def add_row(key, field):
+        def add_row(key, field, form=form_en):
             label = QLabel()
             self.form_labels[key] = label
             form.addRow(label, field)
@@ -523,20 +534,27 @@ class SevakJodaForm(QMainWindow):
             (self.state_en, self.state_mr),
         ]
 
-        add_row("lbl_first_mr", self._mr_row(self.first_name_mr))
-        add_row("lbl_middle_mr", self._mr_row(self.middle_name_mr))
-        add_row("lbl_last_mr", self._mr_row(self.last_name_mr))
-        add_row("lbl_address_mr", self._mr_row(self.address_mr))
-        add_row("lbl_mukkam_mr", self._mr_row(self.mukkam_mr))
-        add_row("lbl_post_mr", self._mr_row(self.post_mr))
-        add_row("lbl_taluka_mr", self._mr_row(self.taluka_mr))
-        add_row("lbl_jilha_mr", self._mr_row(self.jilha_mr))
-        add_row("lbl_state_mr", self._mr_row(self.state_mr))
+        add_row("lbl_first_mr", self._mr_row(self.first_name_mr), form_mr)
+        add_row("lbl_middle_mr", self._mr_row(self.middle_name_mr), form_mr)
+        add_row("lbl_last_mr", self._mr_row(self.last_name_mr), form_mr)
+        add_row("lbl_address_mr", self._mr_row(self.address_mr), form_mr)
+        add_row("lbl_mukkam_mr", self._mr_row(self.mukkam_mr), form_mr)
+        add_row("lbl_post_mr", self._mr_row(self.post_mr), form_mr)
+        add_row("lbl_taluka_mr", self._mr_row(self.taluka_mr), form_mr)
+        add_row("lbl_jilha_mr", self._mr_row(self.jilha_mr), form_mr)
+        add_row("lbl_state_mr", self._mr_row(self.state_mr), form_mr)
 
-        main_layout.addLayout(form)
+        columns_layout = QHBoxLayout()
+        left_container = QWidget()
+        left_container.setLayout(form_en)
+        right_container = QWidget()
+        right_container.setLayout(form_mr)
+        columns_layout.addWidget(left_container)
+        columns_layout.addWidget(right_container)
+        main_layout.addLayout(columns_layout)
 
         self.translate_btn = QPushButton()
-        self.translate_btn.clicked.connect(self.translate_fields)
+        self.translate_btn.clicked.connect(lambda: self.translate_fields())
         main_layout.addWidget(self.translate_btn)
 
         # Photo section
@@ -576,8 +594,15 @@ class SevakJodaForm(QMainWindow):
 
     def _build_edit_member_page(self):
         page = QWidget()
+        outer_layout = QVBoxLayout()
+        page.setLayout(outer_layout)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll_content = QWidget()
+        scroll.setWidget(scroll_content)
         main_layout = QVBoxLayout()
-        page.setLayout(main_layout)
+        scroll_content.setLayout(main_layout)
 
         search_row = QHBoxLayout()
         self.edit_search_label = QLabel()
@@ -588,12 +613,16 @@ class SevakJodaForm(QMainWindow):
         search_row.addWidget(self.edit_search_label)
         search_row.addWidget(self.edit_card_id_search)
         search_row.addWidget(self.edit_load_btn)
-        main_layout.addLayout(search_row)
+        outer_layout.addLayout(search_row)
+        outer_layout.addWidget(scroll)
 
-        form = QFormLayout()
+        # English fields on the left, Marathi/other fields on the right,
+        # so the form doesn't overflow vertically off the screen.
+        form_en = QFormLayout()
+        form_mr = QFormLayout()
         self.edit_form_labels = {}
 
-        def add_row(key, field):
+        def add_row(key, field, form=form_en):
             label = QLabel()
             self.edit_form_labels[key] = label
             form.addRow(label, field)
@@ -652,17 +681,24 @@ class SevakJodaForm(QMainWindow):
             (self.edit_state_en, self.edit_state_mr),
         ]
 
-        add_row("lbl_first_mr", self._mr_row(self.edit_first_name_mr))
-        add_row("lbl_middle_mr", self._mr_row(self.edit_middle_name_mr))
-        add_row("lbl_last_mr", self._mr_row(self.edit_last_name_mr))
-        add_row("lbl_address_mr", self._mr_row(self.edit_address_mr))
-        add_row("lbl_mukkam_mr", self._mr_row(self.edit_mukkam_mr))
-        add_row("lbl_post_mr", self._mr_row(self.edit_post_mr))
-        add_row("lbl_taluka_mr", self._mr_row(self.edit_taluka_mr))
-        add_row("lbl_jilha_mr", self._mr_row(self.edit_jilha_mr))
-        add_row("lbl_state_mr", self._mr_row(self.edit_state_mr))
+        add_row("lbl_first_mr", self._mr_row(self.edit_first_name_mr), form_mr)
+        add_row("lbl_middle_mr", self._mr_row(self.edit_middle_name_mr), form_mr)
+        add_row("lbl_last_mr", self._mr_row(self.edit_last_name_mr), form_mr)
+        add_row("lbl_address_mr", self._mr_row(self.edit_address_mr), form_mr)
+        add_row("lbl_mukkam_mr", self._mr_row(self.edit_mukkam_mr), form_mr)
+        add_row("lbl_post_mr", self._mr_row(self.edit_post_mr), form_mr)
+        add_row("lbl_taluka_mr", self._mr_row(self.edit_taluka_mr), form_mr)
+        add_row("lbl_jilha_mr", self._mr_row(self.edit_jilha_mr), form_mr)
+        add_row("lbl_state_mr", self._mr_row(self.edit_state_mr), form_mr)
 
-        main_layout.addLayout(form)
+        columns_layout = QHBoxLayout()
+        left_container = QWidget()
+        left_container.setLayout(form_en)
+        right_container = QWidget()
+        right_container.setLayout(form_mr)
+        columns_layout.addWidget(left_container)
+        columns_layout.addWidget(right_container)
+        main_layout.addLayout(columns_layout)
 
         self.edit_translate_btn = QPushButton()
         self.edit_translate_btn.clicked.connect(lambda: self.translate_fields(self.edit_translation_pairs))

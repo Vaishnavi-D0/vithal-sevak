@@ -22,7 +22,8 @@ from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QFormLayout, QLineEdit, QTextEdit, QPushButton, QLabel, QMessageBox,
     QFileDialog, QStackedWidget, QFrame, QComboBox, QSpinBox, QListWidget,
-    QListWidgetItem, QDialog, QScrollArea
+    QListWidgetItem, QDialog, QScrollArea, QCheckBox, QTableWidget,
+    QTableWidgetItem
 )
 from PyQt5.QtGui import QFont, QPixmap, QDesktopServices
 from PyQt5.QtCore import Qt, QUrl, QThread, pyqtSignal
@@ -34,6 +35,8 @@ from translator import translate_to_marathi
 from marathi_keyboard import MarathiKeyboard
 import drive_helper
 from network_utils import with_retry
+import openpyxl
+from legacy_font_converter import convert_legacy_marathi
 
 # ---------- CONFIG ----------
 SHEET_ID = "1UfznX39WYRFcl40K32C8zdi7Xhi4WYVn5rpd3emkIUk"
@@ -169,6 +172,26 @@ LABELS = {
     "nav_pass_photo": ("Create Pass Photo PDF", "पास फोटो पीडीएफ तयार करा"),
     "btn_generate_pass_pdf": ("🖨 Generate Pass Photo PDF", "🖨 पास फोटो पीडीएफ तयार करा"),
     "pass_pdf_save_dialog_title": ("Save Pass Photo PDF", "पास फोटो पीडीएफ जतन करा"),
+    "nav_import_records": ("Import Records", "रेकॉर्ड आयात करा"),
+    "btn_select_excel": ("📂 Select Excel File", "📂 एक्सेल फाइल निवडा"),
+    "lbl_select_sheet": ("Sheet:", "शीट:"),
+    "chk_legacy_font": (
+        "Marathi columns use AkrutiDynamicMar_BYogini font (auto-convert - best effort, review after import)",
+        "मराठी स्तंभ AkrutiDynamicMar_BYogini फॉन्टमध्ये आहेत (स्वयं-रूपांतर - अंदाजे, आयातीनंतर तपासा)",
+    ),
+    "lbl_column_mapping": ("Map Excel columns to fields:", "एक्सेल स्तंभ फील्डशी जुळवा:"),
+    "btn_preview_import": ("🔍 Preview", "🔍 पूर्वावलोकन"),
+    "btn_import_all": ("📥 Import All Rows", "📥 सर्व नोंदी आयात करा"),
+    "import_no_file_title": ("No File Selected", "फाइल निवडलेली नाही"),
+    "import_no_file_body": ("Please select an Excel file first.", "कृपया आधी एक्सेल फाइल निवडा."),
+    "import_no_rows_title": ("No Rows", "नोंदी नाहीत"),
+    "import_no_rows_body": ("The selected sheet has no data rows.", "निवडलेल्या शीटमध्ये कोणतीही माहिती नाही."),
+    "import_confirm_title": ("Confirm Import", "आयात निश्चित करा"),
+    "import_no_card_id_title": ("Card Id Not Mapped", "कार्ड आयडी जुळलेला नाही"),
+    "import_no_card_id_body": ("Please map a column to Card Id before importing.",
+                               "आयात करण्यापूर्वी कृपया कार्ड आयडीशी एक स्तंभ जुळवा."),
+    "(none)": ("(none)", "(काहीही नाही)"),
+
 }
 
 
@@ -297,6 +320,9 @@ class SevakJodaForm(QMainWindow):
         self.edit_original_photo_value = None
         self.edit_row_number = None
         self._busy_depth = 0
+        self.import_workbook_path = None
+        self.import_header = []
+        self.import_data_rows = []
         self.resize(1100, 700)
 
         central = QWidget()
@@ -314,11 +340,13 @@ class SevakJodaForm(QMainWindow):
         self.vari_member_page = self._build_wari_attendees_page()
         self.photo_list_page = self._build_photo_list_page()
         self.pass_photo_page = self._build_pass_photo_page()
+        self.import_records_page = self._build_import_records_page()
         self.stack.addWidget(self.add_member_page)
         self.stack.addWidget(self.edit_member_page)
         self.stack.addWidget(self.vari_member_page)
         self.stack.addWidget(self.photo_list_page)
         self.stack.addWidget(self.pass_photo_page)
+        self.stack.addWidget(self.import_records_page)
         self.stack.currentChanged.connect(self.on_page_changed)
 
         root_layout.addWidget(self._build_sidebar())
@@ -381,6 +409,7 @@ class SevakJodaForm(QMainWindow):
             ("nav_vari_member", self.vari_member_page),
             ("nav_photo_list", self.photo_list_page),
             ("nav_pass_photo", self.pass_photo_page),
+            ("nav_import_records", self.import_records_page),
         ]
         for key, page in nav_defs:
             btn = QPushButton()
@@ -507,6 +536,14 @@ class SevakJodaForm(QMainWindow):
         self.pass_photo_select_label.setText(t("lbl_wari_select"))
         self.pass_photo_year_label.setText(t("lbl_wari_year"))
         self.pass_photo_generate_btn.setText(t("btn_generate_pass_pdf"))
+
+        self.import_select_file_btn.setText(t("btn_select_excel"))
+        self.import_sheet_label.setText(t("lbl_select_sheet"))
+        self.import_legacy_font_checkbox.setText(t("chk_legacy_font"))
+        self.import_mapping_label.setText(t("lbl_column_mapping"))
+        self.import_preview_btn.setText(t("btn_preview_import"))
+        self.import_all_btn.setText(t("btn_import_all"))
+        self._refresh_import_field_labels()
 
     # ---------- Add Member page ----------
 
@@ -1235,6 +1272,262 @@ class SevakJodaForm(QMainWindow):
             )
 
         c.save()
+
+    # ---------- Import Records page ----------
+
+    # Target fields offered for column mapping, in display order, reusing
+    # the same label keys as the Add Member form.
+    IMPORT_FIELDS = [
+        ("card_id", "lbl_card_id"), ("first_en", "lbl_first_en"), ("middle_en", "lbl_middle_en"),
+        ("last_en", "lbl_last_en"), ("dob", "lbl_dob"), ("phone", "lbl_phone"),
+        ("address_en", "lbl_address_en"), ("mukkam_en", "lbl_mukkam_en"), ("post_en", "lbl_post_en"),
+        ("taluka_en", "lbl_taluka_en"), ("district_en", "lbl_district_en"), ("state_en", "lbl_state_en"),
+        ("pincode", "lbl_pincode"),
+        ("first_mr", "lbl_first_mr"), ("middle_mr", "lbl_middle_mr"), ("last_mr", "lbl_last_mr"),
+        ("address_mr", "lbl_address_mr"), ("mukkam_mr", "lbl_mukkam_mr"), ("post_mr", "lbl_post_mr"),
+        ("taluka_mr", "lbl_taluka_mr"), ("jilha_mr", "lbl_jilha_mr"), ("state_mr", "lbl_state_mr"),
+    ]
+    # Fields whose values should run through the legacy-font converter when
+    # the "legacy font" checkbox is on (Marathi text columns only).
+    IMPORT_MARATHI_FIELDS = {
+        "first_mr", "middle_mr", "last_mr", "address_mr",
+        "mukkam_mr", "post_mr", "taluka_mr", "jilha_mr", "state_mr",
+    }
+
+    def _build_import_records_page(self):
+        page = QWidget()
+        outer_layout = QVBoxLayout()
+        page.setLayout(outer_layout)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll_content = QWidget()
+        scroll.setWidget(scroll_content)
+        layout = QVBoxLayout()
+        scroll_content.setLayout(layout)
+        outer_layout.addWidget(scroll)
+
+        file_row = QHBoxLayout()
+        self.import_select_file_btn = QPushButton()
+        self.import_select_file_btn.clicked.connect(self.select_import_excel_file)
+        self.import_file_label = QLabel("(no file selected)")
+        file_row.addWidget(self.import_select_file_btn)
+        file_row.addWidget(self.import_file_label, 1)
+        layout.addLayout(file_row)
+
+        sheet_row = QHBoxLayout()
+        self.import_sheet_label = QLabel()
+        self.import_sheet_combo = QComboBox()
+        self.import_sheet_combo.currentIndexChanged.connect(self._on_import_sheet_changed)
+        sheet_row.addWidget(self.import_sheet_label)
+        sheet_row.addWidget(self.import_sheet_combo, 1)
+        layout.addLayout(sheet_row)
+
+        self.import_legacy_font_checkbox = QCheckBox()
+        layout.addWidget(self.import_legacy_font_checkbox)
+
+        self.import_mapping_label = QLabel()
+        layout.addWidget(self.import_mapping_label)
+
+        mapping_form = QFormLayout()
+        self.import_field_labels = {}
+        self.import_column_combos = {}
+        for field_key, label_key in self.IMPORT_FIELDS:
+            label = QLabel()
+            self.import_field_labels[field_key] = label
+            combo = QComboBox()
+            self.import_column_combos[field_key] = combo
+            mapping_form.addRow(label, combo)
+        layout.addLayout(mapping_form)
+
+        btn_row = QHBoxLayout()
+        self.import_preview_btn = QPushButton()
+        self.import_preview_btn.clicked.connect(self.preview_import_records)
+        self.import_all_btn = QPushButton()
+        self.import_all_btn.setStyleSheet("font-size: 14px; padding: 10px; background-color: #4CAF50; color: white;")
+        self.import_all_btn.clicked.connect(self.import_all_records)
+        btn_row.addWidget(self.import_preview_btn)
+        btn_row.addWidget(self.import_all_btn)
+        layout.addLayout(btn_row)
+
+        self.import_preview_table = QTableWidget()
+        layout.addWidget(self.import_preview_table, 1)
+
+        return page
+
+    def _refresh_import_field_labels(self):
+        idx = 0 if self.lang == "en" else 1
+        for field_key, label_key in self.IMPORT_FIELDS:
+            self.import_field_labels[field_key].setText(LABELS[label_key][idx])
+
+    def select_import_excel_file(self):
+        filepath, _ = QFileDialog.getOpenFileName(
+            self, "Select Excel File", "", "Excel Files (*.xlsx *.xlsm *.xls)"
+        )
+        if not filepath:
+            return
+        idx = 0 if self.lang == "en" else 1
+        self._set_busy(True, LABELS["status_loading"][idx])
+        try:
+            workbook = openpyxl.load_workbook(filepath, data_only=True, read_only=True)
+        except Exception as e:
+            self._set_busy(False)
+            QMessageBox.critical(self, LABELS["error_title"][idx], f"Could not open file: {e}")
+            return
+        self._set_busy(False)
+
+        self.import_workbook_path = filepath
+        self.import_file_label.setText(os.path.basename(filepath))
+        self.import_sheet_combo.blockSignals(True)
+        self.import_sheet_combo.clear()
+        self.import_sheet_combo.addItems(workbook.sheetnames)
+        self.import_sheet_combo.blockSignals(False)
+        self._on_import_sheet_changed()
+
+    def _on_import_sheet_changed(self):
+        sheet_name = self.import_sheet_combo.currentText()
+        if not sheet_name or not getattr(self, "import_workbook_path", None):
+            return
+        idx = 0 if self.lang == "en" else 1
+        self._set_busy(True, LABELS["status_loading"][idx])
+        try:
+            workbook = openpyxl.load_workbook(self.import_workbook_path, data_only=True, read_only=True)
+            ws = workbook[sheet_name]
+            rows = list(ws.iter_rows(values_only=True))
+        except Exception as e:
+            self._set_busy(False)
+            QMessageBox.critical(self, LABELS["error_title"][idx], f"Could not read sheet: {e}")
+            return
+        self._set_busy(False)
+
+        self.import_header = [str(c).strip() if c is not None else "" for c in (rows[0] if rows else [])]
+        self.import_data_rows = rows[1:] if len(rows) > 1 else []
+        self._populate_import_column_combos()
+
+    def _populate_import_column_combos(self):
+        idx = 0 if self.lang == "en" else 1
+        none_label = LABELS["(none)"][idx]
+        options = [none_label] + self.import_header
+        for field_key, label_key in self.IMPORT_FIELDS:
+            combo = self.import_column_combos[field_key]
+            combo.blockSignals(True)
+            combo.clear()
+            combo.addItems(options)
+            best_match = self._auto_match_column(field_key, label_key)
+            if best_match is not None:
+                combo.setCurrentIndex(self.import_header.index(best_match) + 1)
+            else:
+                combo.setCurrentIndex(0)
+            combo.blockSignals(False)
+
+    def _auto_match_column(self, field_key, label_key):
+        """Best-effort auto-match of a target field to an Excel header, by
+        loose case-insensitive matching against the field key and its
+        bilingual label text."""
+        candidates = {field_key.lower(), field_key.replace("_", " ").lower()}
+        for lang_idx in (0, 1):
+            label_text = LABELS[label_key][lang_idx]
+            candidates.add(label_text.lower().replace(":", "").strip())
+        for header in self.import_header:
+            h = header.lower().strip()
+            if h in candidates:
+                return header
+        for header in self.import_header:
+            h = header.lower().strip()
+            if any(c and (c in h or h in c) for c in candidates):
+                return header
+        return None
+
+    def _mapped_row_dict(self, row):
+        """Builds a {field_key: value} dict for one Excel data row, applying
+        the legacy-font converter to Marathi fields if that option is on."""
+        convert = self.import_legacy_font_checkbox.isChecked()
+        result = {}
+        for field_key, _ in self.IMPORT_FIELDS:
+            combo = self.import_column_combos[field_key]
+            col_name = combo.currentText()
+            if not col_name or col_name in (LABELS["(none)"][0], LABELS["(none)"][1]):
+                result[field_key] = ""
+                continue
+            col_index = self.import_header.index(col_name)
+            value = row[col_index] if col_index < len(row) else ""
+            value = "" if value is None else str(value).strip()
+            if convert and field_key in self.IMPORT_MARATHI_FIELDS and value:
+                value = convert_legacy_marathi(value)
+            result[field_key] = value
+        return result
+
+    def preview_import_records(self):
+        idx = 0 if self.lang == "en" else 1
+        if not getattr(self, "import_data_rows", None):
+            QMessageBox.warning(self, LABELS["import_no_rows_title"][idx], LABELS["import_no_rows_body"][idx])
+            return
+
+        preview_rows = self.import_data_rows[:10]
+        mapped = [self._mapped_row_dict(row) for row in preview_rows]
+        field_keys = [fk for fk, _ in self.IMPORT_FIELDS]
+
+        self.import_preview_table.clear()
+        self.import_preview_table.setColumnCount(len(field_keys))
+        self.import_preview_table.setHorizontalHeaderLabels(
+            [LABELS[lk][idx] for _, lk in self.IMPORT_FIELDS]
+        )
+        self.import_preview_table.setRowCount(len(mapped))
+        for r, record in enumerate(mapped):
+            for c, key in enumerate(field_keys):
+                self.import_preview_table.setItem(r, c, QTableWidgetItem(record.get(key, "")))
+
+    def import_all_records(self):
+        idx = 0 if self.lang == "en" else 1
+        if not getattr(self, "import_data_rows", None):
+            QMessageBox.warning(self, LABELS["import_no_rows_title"][idx], LABELS["import_no_rows_body"][idx])
+            return
+
+        card_id_combo = self.import_column_combos["card_id"]
+        if card_id_combo.currentIndex() == 0:
+            QMessageBox.warning(self, LABELS["import_no_card_id_title"][idx], LABELS["import_no_card_id_body"][idx])
+            return
+
+        confirm = QMessageBox.question(
+            self, LABELS["import_confirm_title"][idx],
+            f"{LABELS['import_confirm_title'][idx]}: {len(self.import_data_rows)} "
+            f"{'rows' if idx == 0 else 'नोंदी'}?",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
+        )
+        if confirm != QMessageBox.Yes:
+            return
+
+        self._set_busy(True, LABELS["status_saving"][idx])
+        imported = 0
+        try:
+            sheet = get_sheet()
+            header_map = get_header_map(sheet)
+            width = (max(header_map.values()) + 1) if header_map else len(DETAILS_FIELDS)
+            existing_rows = len(sheet.get_all_values())
+            new_rows = []
+            for i, row in enumerate(self.import_data_rows):
+                record = self._mapped_row_dict(row)
+                if not record.get("card_id"):
+                    continue
+                record["serial_no"] = existing_rows + len(new_rows)
+                out_row = [""] * width
+                for key, value in record.items():
+                    col_i = header_map.get(DETAILS_FIELDS.get(key, ""))
+                    if col_i is not None:
+                        out_row[col_i] = value
+                new_rows.append(out_row)
+            if new_rows:
+                sheet.append_rows(new_rows)
+                imported = len(new_rows)
+        except Exception as e:
+            self._set_busy(False)
+            QMessageBox.critical(self, LABELS["error_title"][idx], f"Import failed: {e}")
+            return
+        self._set_busy(False)
+        QMessageBox.information(
+            self, LABELS["success_title"][idx],
+            f"{imported} {'records imported successfully!' if idx == 0 else 'नोंदी यशस्वीरित्या आयात झाल्या!'}"
+        )
 
     def fetch_full_details_map(self):
         """Reads the Sevak Details sheet into a dict keyed by card_id, with

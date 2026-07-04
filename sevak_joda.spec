@@ -15,6 +15,7 @@ hidden_imports = (
     collect_submodules("win32com")
     + collect_submodules("googleapiclient")
     + collect_submodules("google_auth_httplib2")
+    + collect_submodules("openpyxl")
     + [
         "win32timezone",
         "gspread",
@@ -52,6 +53,7 @@ a = Analysis(
         ("drive_helper.py", "."),
         ("marathi_text_render.py", "."),
         ("network_utils.py", "."),
+        ("legacy_font_converter.py", "."),
         ("fonts/NotoSansDevanagari-Regular.ttf", "fonts"),
     ] + extra_datas,
     hiddenimports=hidden_imports,

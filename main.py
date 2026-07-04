@@ -130,6 +130,15 @@ LABELS = {
     "duplicate_body": ("This member is already in the attendee list for this Wari/year.",
                         "हा सेवक या वारी/वर्षासाठी आधीच यादीत आहे."),
     "wari_added_body": ("Member added to Wari Attendees!", "सेवक वारी उपस्थितीत जोडला!"),
+    "btn_show_list": ("📋 Show List", "📋 यादी दाखवा"),
+    "btn_remove_attendee": ("🗑 Remove Selected", "🗑 निवडलेले काढा"),
+    "remove_confirm_title": ("Remove Attendee?", "उपस्थित सेवक काढायचा?"),
+    "remove_confirm_body": ("Remove this member from the attendee list?",
+                            "या सेवकाला उपस्थित यादीतून काढायचे का?"),
+    "no_attendee_selected_title": ("No Selection", "निवड नाही"),
+    "no_attendee_selected_body": ("Please select an attendee from the list first.",
+                                  "कृपया आधी यादीतून एक सेवक निवडा."),
+    "remove_success_body": ("Attendee removed.", "सेवक काढला."),
     "search_no_results": ("No matches found", "काही जुळणी सापडली नाही"),
     "selected_member_prefix": ("Selected: ", "निवडलेले: "),
     "none_selected": ("No member selected", "कोणताही सेवक निवडलेला नाही"),
@@ -440,6 +449,8 @@ class SevakJodaForm(QMainWindow):
         self.wari_search_label.setText(t("lbl_search_member"))
         self.wari_search_btn.setText(t("btn_search"))
         self.wari_add_btn.setText(t("btn_add_to_wari"))
+        self.wari_show_list_btn.setText(t("btn_show_list"))
+        self.wari_remove_btn.setText(t("btn_remove_attendee"))
         self.wari_attendees_label.setText(t("lbl_attendees_list"))
         if self.selected_wari_member is None:
             self.wari_selected_label.setText(t("none_selected"))
@@ -779,15 +790,24 @@ class SevakJodaForm(QMainWindow):
         self.wari_selected_label = QLabel()
         layout.addWidget(self.wari_selected_label)
 
+        add_show_row = QHBoxLayout()
         self.wari_add_btn = QPushButton()
         self.wari_add_btn.clicked.connect(self.save_wari_attendee)
-        layout.addWidget(self.wari_add_btn)
+        self.wari_show_list_btn = QPushButton()
+        self.wari_show_list_btn.clicked.connect(lambda: self.refresh_wari_attendees_list())
+        add_show_row.addWidget(self.wari_add_btn)
+        add_show_row.addWidget(self.wari_show_list_btn)
+        layout.addLayout(add_show_row)
 
         self.wari_attendees_label = QLabel()
         layout.addWidget(self.wari_attendees_label)
 
         self.wari_attendees_listbox = QListWidget()
         layout.addWidget(self.wari_attendees_listbox, 1)
+
+        self.wari_remove_btn = QPushButton()
+        self.wari_remove_btn.clicked.connect(self.remove_wari_attendee)
+        layout.addWidget(self.wari_remove_btn)
 
         return page
 
@@ -913,9 +933,35 @@ class SevakJodaForm(QMainWindow):
 
         wari_name = self.wari_combo.currentData()
         wari_year = str(self.wari_year_spin.value())
-        for row in values[1:]:
+        for row_number, row in enumerate(values[1:], start=2):
             if len(row) >= 4 and row[0] == wari_name and str(row[1]) == wari_year:
-                self.wari_attendees_listbox.addItem(f'{row[2]} — {row[3]}')
+                item = QListWidgetItem(f'{row[2]} — {row[3]}')
+                item.setData(Qt.UserRole, row_number)
+                self.wari_attendees_listbox.addItem(item)
+
+    def remove_wari_attendee(self):
+        idx = 0 if self.lang == "en" else 1
+        item = self.wari_attendees_listbox.currentItem()
+        if not item:
+            QMessageBox.warning(self, LABELS["no_attendee_selected_title"][idx],
+                                 LABELS["no_attendee_selected_body"][idx])
+            return
+
+        confirm = QMessageBox.question(
+            self, LABELS["remove_confirm_title"][idx], LABELS["remove_confirm_body"][idx],
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
+        )
+        if confirm != QMessageBox.Yes:
+            return
+
+        row_number = item.data(Qt.UserRole)
+        try:
+            sheet = get_sheet(WARI_SHEET_NAME)
+            sheet.delete_rows(row_number)
+            self.refresh_wari_attendees_list()
+            QMessageBox.information(self, LABELS["success_title"][idx], LABELS["remove_success_body"][idx])
+        except Exception as e:
+            QMessageBox.critical(self, LABELS["error_title"][idx], f"Failed to remove: {e}")
 
     # ---------- Create Wari Photo List page ----------
 

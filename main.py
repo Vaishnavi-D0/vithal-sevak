@@ -311,6 +311,14 @@ def _to_number(value):
     return value
 
 
+_DEVANAGARI_DIGITS = str.maketrans("0123456789", "०१२३४५६७८९")
+
+
+def _to_devanagari_digits(text):
+    """Converts any Latin digits in text to Devanagari numerals (०-९)."""
+    return text.translate(_DEVANAGARI_DIGITS) if text else text
+
+
 class TranslateWorker(QThread):
     """Runs the (network-bound) translation calls off the UI thread, so a
     slow/blocked connection can't freeze - or appear to crash - the app."""
@@ -1310,15 +1318,16 @@ class SevakJodaForm(QMainWindow):
         self._set_busy(False)
         QMessageBox.information(self, LABELS["success_title"][idx], LABELS["pdf_success_body"][idx])
 
-    def _fit_pass_photo_name(self, last_name, first_name, font_name, font_size, max_width):
-        """Returns "Last First" if it fits within max_width, otherwise
-        abbreviates the first name to its initial + a dot ("Last F.")."""
+    def _fit_pass_photo_name(self, last_name, first_name, font_name, font_size, max_width, prefix=""):
+        """Returns "<prefix>Last First" if it fits within max_width,
+        otherwise abbreviates the first name to its initial + a dot
+        ("<prefix>Last F.")."""
         last_name = (last_name or "").strip()
         first_name = (first_name or "").strip()
-        full = " ".join(filter(None, [last_name, first_name]))
+        full = prefix + " ".join(filter(None, [last_name, first_name]))
         if pdfmetrics.stringWidth(full, font_name, font_size) <= max_width or not first_name:
             return full
-        abbreviated = " ".join(filter(None, [last_name, f"{first_name[0]}."]))
+        abbreviated = prefix + " ".join(filter(None, [last_name, f"{first_name[0]}."]))
         return abbreviated
 
     def _render_pass_photo_pdf(self, save_path, card_ids, details_map):
@@ -1380,7 +1389,8 @@ class SevakJodaForm(QMainWindow):
             last_en = record.get("last_en", "") or record.get("last_mr", "")
             first_en = record.get("first_en", "") or record.get("first_mr", "")
             name_text = self._fit_pass_photo_name(
-                last_en, first_en, "Helvetica", NAME_FONT_SIZE, CELL_W - 0.1 * cm
+                last_en, first_en, "Helvetica", NAME_FONT_SIZE, CELL_W - 0.1 * cm,
+                prefix=f"{i + 1}. ",
             )
             c.setFont("Helvetica", NAME_FONT_SIZE)
             c.drawCentredString(
@@ -1935,7 +1945,9 @@ class SevakJodaForm(QMainWindow):
         COL5_W = self.PHOTO_LIST_COL5_W
         col_widths = [COL1_W, COL2_W, COL3_W, COL4_W, COL5_W]
         BLOCK_W = sum(col_widths)
-        BLOCK_H = 3 * cm
+        # a touch taller than 3cm to give the bigger 11pt font breathing
+        # room, while every block still shares this same fixed size
+        BLOCK_H = 3.15 * cm
         HEADER_H = 0.4 * cm
         MEMBERS_PER_PAGE = 7
         MARGIN_TOP = 1.5 * cm
@@ -1945,7 +1957,7 @@ class SevakJodaForm(QMainWindow):
         c = pdfcanvas.Canvas(save_path, pagesize=A4)
         photo_cache = {}
         FONT_SIZE = 9
-        MARATHI_FONT_SIZE = FONT_SIZE + 1.4
+        MARATHI_FONT_SIZE = 11
         HEADER_FONT_SIZE = 8
         TEXT_PADDING = 0.15 * cm
         ADDRESS_MAX_WIDTH = COL2_W - TEXT_PADDING - 0.1 * cm
@@ -2003,7 +2015,7 @@ class SevakJodaForm(QMainWindow):
             line_height = BLOCK_H / max(6.0, len(lines) + 0.2)
             text_y = y_top - line_height * 0.8
             for line in lines:
-                self._draw_shaped_line(c, line, text_x, text_y, MARATHI_FONT_SIZE)
+                self._draw_shaped_line(c, _to_devanagari_digits(line), text_x, text_y, MARATHI_FONT_SIZE)
                 text_y -= line_height
 
             # column 3: photo, stretched to fill the cell edge-to-edge

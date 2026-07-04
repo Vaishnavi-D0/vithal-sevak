@@ -2,6 +2,11 @@
 scanner_capture.py
 Captures a photo from a WIA-compatible scanner (Windows only).
 Works with most flatbed / passport-photo scanners.
+
+The scanner bed is A4-sized, but the actual photo placed on it is always a
+small passport-size photo somewhere on that bed - so instead of assuming
+the photo fills the whole scanned frame, we auto-detect the photo's actual
+bounds (the non-background region) and crop to just that.
 """
 
 import os
@@ -10,11 +15,55 @@ from datetime import datetime
 PHOTOS_DIR = "photos"
 os.makedirs(PHOTOS_DIR, exist_ok=True)
 
+SCAN_DPI = 1200
+FINAL_LONG_EDGE_PX = 1200
+# Anything darker than this (out of 255, grayscale) is considered part of
+# the actual photo rather than the scanner bed's white/light background.
+BACKGROUND_THRESHOLD = 235
+# Small margin (px, at SCAN_DPI) kept around the detected photo edges so
+# auto-crop doesn't clip into the picture.
+CROP_PADDING = 15
+
+
+def _autocrop_to_photo(img):
+    """Finds the bounding box of the actual photo content on the scanned
+    A4 page (i.e. everything that isn't blank scanner-bed background) and
+    crops to it, with a small padding margin. Falls back to the full image
+    if no distinct content region is found."""
+    gray = img.convert("L")
+    binary = gray.point(lambda p: 255 if p < BACKGROUND_THRESHOLD else 0)
+    bbox = binary.getbbox()
+    if not bbox:
+        return img
+
+    left, top, right, bottom = bbox
+    left = max(0, left - CROP_PADDING)
+    top = max(0, top - CROP_PADDING)
+    right = min(img.width, right + CROP_PADDING)
+    bottom = min(img.height, bottom + CROP_PADDING)
+    return img.crop((left, top, right, bottom))
+
+
+def _resize_long_edge(img, target_px):
+    w, h = img.size
+    if w <= 0 or h <= 0:
+        return img
+    if w >= h:
+        new_w = target_px
+        new_h = max(1, round(h * (target_px / w)))
+    else:
+        new_h = target_px
+        new_w = max(1, round(w * (target_px / h)))
+    from PIL import Image
+    resample = getattr(Image, "LANCZOS", getattr(Image, "ANTIALIAS", None))
+    return img.resize((new_w, new_h), resample)
+
 
 def scan_photo():
     """
-    Opens the scanner, scans an image, saves it cropped to
-    passport-size proportions, returns the saved file path.
+    Opens the scanner, scans the A4 bed, auto-crops to just the passport
+    photo actually placed on it, resizes so its longer edge is
+    FINAL_LONG_EDGE_PX, and returns the saved file path.
     Only works on Windows with a WIA-compatible scanner connected.
     """
     try:
@@ -33,11 +82,12 @@ def scan_photo():
     # WIA_ITEM_ID for flatbed scanners; item(1) is usually the scan bed
     item = device.Items[1]
 
-    # Set scan properties: color, 300 DPI is good for passport photo printing
+    # Set scan properties: color, high DPI for a precise auto-crop and a
+    # sharp final image once cropped down to just the passport photo.
     try:
-        item.Properties("6146").Value = 1      # 1 = Color intent
-        item.Properties("6147").Value = 300     # Horizontal resolution (DPI)
-        item.Properties("6148").Value = 300     # Vertical resolution (DPI)
+        item.Properties("6146").Value = 1              # 1 = Color intent
+        item.Properties("6147").Value = SCAN_DPI        # Horizontal resolution (DPI)
+        item.Properties("6148").Value = SCAN_DPI        # Vertical resolution (DPI)
     except Exception:
         pass  # some scanners don't expose all properties; safe to skip
 
@@ -47,22 +97,11 @@ def scan_photo():
     raw_path = os.path.join(PHOTOS_DIR, f"scan_raw_{timestamp}.bmp")
     image.SaveFile(raw_path)
 
-    # Crop to passport-size ratio and save as JPG using Pillow
     from PIL import Image
     img = Image.open(raw_path)
-    w, h = img.size
-    target_ratio = 3.5 / 4.5
+    img = _autocrop_to_photo(img)
+    img = _resize_long_edge(img, FINAL_LONG_EDGE_PX)
 
-    if w / h > target_ratio:
-        new_w = int(h * target_ratio)
-        left = (w - new_w) // 2
-        img = img.crop((left, 0, left + new_w, h))
-    else:
-        new_h = int(w / target_ratio)
-        top = (h - new_h) // 2
-        img = img.crop((0, top, w, top + new_h))
-
-    img = img.resize((413, 531))  # ~3.5x4.5cm @ 300dpi
     final_path = os.path.join(PHOTOS_DIR, f"photo_{timestamp}.jpg")
     img.convert("RGB").save(final_path, "JPEG", quality=95)
 

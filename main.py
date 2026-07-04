@@ -191,14 +191,19 @@ LABELS = {
     "import_no_card_id_body": ("Please map a column to Card Id before importing.",
                                "आयात करण्यापूर्वी कृपया कार्ड आयडीशी एक स्तंभ जुळवा."),
     "(none)": ("(none)", "(काहीही नाही)"),
-    "btn_bulk_translate": ("🌐 Translate All Missing Marathi", "🌐 उर्वरित सर्व मराठी भाषांतर करा"),
-    "bulk_translate_confirm_title": ("Translate All?", "सर्व भाषांतर करायचे का?"),
+    "btn_bulk_translate": ("🌐 Translate All Missing Marathi + Link Photos",
+                           "🌐 उर्वरित मराठी भाषांतर करा + फोटो जोडा"),
+    "bulk_translate_confirm_title": ("Translate & Link Photos?", "भाषांतर आणि फोटो जोडायचे का?"),
     "bulk_translate_confirm_body": (
-        "This scans every member in Sevak Details and fills in any blank "
-        "Marathi field from its English value. Existing Marathi text is left "
-        "untouched. Continue?",
-        "हे Sevak Details मधील प्रत्येक सेवक तपासून रिकाम्या मराठी फील्डमध्ये "
-        "इंग्रजी मजकुरावरून भाषांतर भरेल. आधीपासून असलेला मराठी मजकूर तसाच राहील. पुढे जायचे का?",
+        "This scans every member in Sevak Details: fills in any blank "
+        "Marathi field from its English value, and links any blank photo "
+        "field to a Drive photo whose filename contains that member's "
+        "Card Id. Existing Marathi text and photo links are left untouched. "
+        "Continue?",
+        "हे Sevak Details मधील प्रत्येक सेवक तपासून रिकाम्या मराठी फील्डमध्ये इंग्रजी "
+        "मजकुरावरून भाषांतर भरेल, आणि ज्या सेवकाचा फोटो रिकामा आहे त्यासाठी कार्ड आयडी "
+        "असलेल्या ड्राइव्ह फोटोची लिंक जोडेल. आधीपासून असलेला मराठी मजकूर आणि फोटो लिंक "
+        "तसेच राहतील. पुढे जायचे का?",
     ),
 
 }
@@ -331,9 +336,11 @@ class BulkTranslateWorker(QThread):
     """Scans the whole Sevak Details sheet for rows where an English field
     is filled in but its Marathi counterpart is blank, translates just
     those, and writes them all back in one batch update - so existing
-    records typed in manually don't need to be opened one by one."""
+    records typed in manually don't need to be opened one by one. Also
+    fills in any blank photo link by matching a Drive photo whose filename
+    contains the member's card_id."""
     progress = pyqtSignal(int, int)
-    finished_ok = pyqtSignal(int)
+    finished_ok = pyqtSignal(int, int)  # (translated_count, photo_linked_count)
     failed = pyqtSignal(str)
 
     EN_TO_MR_PAIRS = [
@@ -342,19 +349,37 @@ class BulkTranslateWorker(QThread):
         ("taluka_en", "taluka_mr"), ("district_en", "jilha_mr"), ("state_en", "state_mr"),
     ]
 
+    def _build_photo_link_by_card_id(self, card_id, drive_files):
+        """Finds a Drive photo whose filename contains this card_id and
+        returns its view link, or None if no match is found."""
+        card_id = str(card_id).strip()
+        if not card_id:
+            return None
+        for f in drive_files:
+            name_without_ext = os.path.splitext(f["name"])[0]
+            if card_id == name_without_ext or card_id in name_without_ext:
+                return f"https://drive.google.com/file/d/{f['id']}/view"
+        return None
+
     def run(self):
         try:
             sheet = get_sheet(DETAILS_SHEET_NAME)
             values = sheet.get_all_values()
             if not values or len(values) < 2:
-                self.finished_ok.emit(0)
+                self.finished_ok.emit(0, 0)
                 return
+
+            try:
+                drive_files = drive_helper.list_photos()
+            except RuntimeError:
+                drive_files = []  # photo linking is best-effort; translation still proceeds
 
             header_map = get_header_map(sheet)
             data_rows = values[1:]
             total = len(data_rows)
             batch_data = []
-            updated = 0
+            translated_count = 0
+            photo_linked_count = 0
 
             for i, row in enumerate(data_rows):
                 self.progress.emit(i + 1, total)
@@ -372,11 +397,22 @@ class BulkTranslateWorker(QThread):
                                     "range": gspread.utils.rowcol_to_a1(row_number, col),
                                     "values": [[translated]],
                                 })
-                                updated += 1
+                                translated_count += 1
+
+                if not record.get("photo") and drive_files:
+                    link = self._build_photo_link_by_card_id(record.get("card_id", ""), drive_files)
+                    if link:
+                        col = details_col_index(header_map, "photo")
+                        if col is not None:
+                            batch_data.append({
+                                "range": gspread.utils.rowcol_to_a1(row_number, col),
+                                "values": [[link]],
+                            })
+                            photo_linked_count += 1
 
             if batch_data:
                 sheet.batch_update(batch_data)
-            self.finished_ok.emit(updated)
+            self.finished_ok.emit(translated_count, photo_linked_count)
         except Exception as e:
             self.failed.emit(str(e))
 
@@ -1638,12 +1674,13 @@ class SevakJodaForm(QMainWindow):
         idx = 0 if self.lang == "en" else 1
         self.statusBar().showMessage(f"{LABELS['status_translating'][idx]} ({current}/{total})")
 
-    def _on_bulk_translate_finished(self, updated_count):
+    def _on_bulk_translate_finished(self, translated_count, photo_linked_count):
         idx = 0 if self.lang == "en" else 1
         self._set_busy(False)
         body = (
-            f"{updated_count} Marathi field(s) translated and updated!" if idx == 0
-            else f"{updated_count} मराठी फील्ड भाषांतरित करून अद्यतनित केले!"
+            f"{translated_count} Marathi field(s) translated and {photo_linked_count} photo link(s) added!"
+            if idx == 0
+            else f"{translated_count} मराठी फील्ड भाषांतरित आणि {photo_linked_count} फोटो लिंक जोडल्या!"
         )
         QMessageBox.information(self, LABELS["success_title"][idx], body)
 

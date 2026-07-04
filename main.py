@@ -1357,7 +1357,7 @@ class SevakJodaForm(QMainWindow):
         # once cut out, and a small gap between columns so side-by-side
         # cuts don't need to split a shared border either.
         ROW_GAP = 0.3 * cm
-        COL_GAP = 0.1 * cm
+        COL_GAP = 0.3 * cm
         PAGE_MARGIN = 0.5 * cm
 
         page_width, page_height = A4

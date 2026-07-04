@@ -350,14 +350,19 @@ class BulkTranslateWorker(QThread):
     ]
 
     def _build_photo_link_by_card_id(self, card_id, drive_files):
-        """Finds a Drive photo whose filename contains this card_id and
-        returns its view link, or None if no match is found."""
+        """Finds a Drive photo whose filename contains this card_id -
+        possibly concatenated with other text (e.g. "525_ramesh.jpg",
+        "IMG_525.jpg") - and returns its view link, or None if no match.
+        Requires the card_id to appear as a whole number (not embedded
+        inside a longer number, e.g. card_id "25" must not match "1250"),
+        but allows any non-digit text immediately around it."""
         card_id = str(card_id).strip()
         if not card_id:
             return None
+        pattern = re.compile(r"(?<!\d)" + re.escape(card_id) + r"(?!\d)")
         for f in drive_files:
             name_without_ext = os.path.splitext(f["name"])[0]
-            if card_id == name_without_ext or card_id in name_without_ext:
+            if pattern.search(name_without_ext):
                 return f"https://drive.google.com/file/d/{f['id']}/view"
         return None
 

@@ -115,11 +115,18 @@ def _do_list_photos(folder_id):
         f"'{folder_id}' in parents and trashed = false "
         "and mimeType contains 'image/'"
     )
-    results = service.files().list(
-        q=query, fields="files(id, name)", pageSize=1000,
-        orderBy="name"
-    ).execute()
-    return results.get("files", [])
+    files = []
+    page_token = None
+    while True:
+        results = service.files().list(
+            q=query, fields="nextPageToken, files(id, name)", pageSize=1000,
+            orderBy="name", pageToken=page_token,
+        ).execute()
+        files.extend(results.get("files", []))
+        page_token = results.get("nextPageToken")
+        if not page_token:
+            break
+    return files
 
 
 def list_photos(folder_id=DRIVE_FOLDER_ID):

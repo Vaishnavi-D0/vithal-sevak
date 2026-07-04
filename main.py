@@ -352,7 +352,7 @@ class BulkTranslateWorker(QThread):
     fills in any blank photo link by matching a Drive photo whose filename
     contains the member's card_id."""
     progress = pyqtSignal(int, int)
-    finished_ok = pyqtSignal(int, int)  # (translated_count, photo_linked_count)
+    finished_ok = pyqtSignal(int, int, int)  # (translated_count, photo_linked_count, drive_files_scanned)
     failed = pyqtSignal(str)
 
     EN_TO_MR_PAIRS = [
@@ -383,7 +383,7 @@ class BulkTranslateWorker(QThread):
             sheet = get_sheet(DETAILS_SHEET_NAME)
             values = sheet.get_all_values()
             if not values or len(values) < 2:
-                self.finished_ok.emit(0, 0)
+                self.finished_ok.emit(0, 0, 0)
                 return
 
             try:
@@ -429,7 +429,7 @@ class BulkTranslateWorker(QThread):
 
             if batch_data:
                 sheet.batch_update(batch_data)
-            self.finished_ok.emit(translated_count, photo_linked_count)
+            self.finished_ok.emit(translated_count, photo_linked_count, len(drive_files))
         except Exception as e:
             self.failed.emit(str(e))
 
@@ -1709,13 +1709,15 @@ class SevakJodaForm(QMainWindow):
         idx = 0 if self.lang == "en" else 1
         self.statusBar().showMessage(f"{LABELS['status_translating'][idx]} ({current}/{total})")
 
-    def _on_bulk_translate_finished(self, translated_count, photo_linked_count):
+    def _on_bulk_translate_finished(self, translated_count, photo_linked_count, drive_files_scanned):
         idx = 0 if self.lang == "en" else 1
         self._set_busy(False)
         body = (
-            f"{translated_count} Marathi field(s) translated and {photo_linked_count} photo link(s) added!"
+            f"{translated_count} Marathi field(s) translated and {photo_linked_count} photo link(s) added!\n"
+            f"(Scanned {drive_files_scanned} photo(s) in the Drive folder.)"
             if idx == 0
-            else f"{translated_count} मराठी फील्ड भाषांतरित आणि {photo_linked_count} फोटो लिंक जोडल्या!"
+            else f"{translated_count} मराठी फील्ड भाषांतरित आणि {photo_linked_count} फोटो लिंक जोडल्या!\n"
+                 f"(ड्राइव्ह फोल्डरमध्ये {drive_files_scanned} फोटो तपासले.)"
         )
         QMessageBox.information(self, LABELS["success_title"][idx], body)
 

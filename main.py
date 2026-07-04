@@ -1810,15 +1810,33 @@ class SevakJodaForm(QMainWindow):
         parts = [p.strip() for p in (state_mr, pincode) if (p or "").strip()]
         return " ".join(parts)
 
-    def _build_photo_list_block_lines(self, full_name, record, phone):
+    @staticmethod
+    def _wrap_address_last_two_words(text, font_name, font_size, max_width):
+        """If text is too wide for max_width, moves its last 2 words down to
+        a new line - repeating on that first line as many times as needed
+        (each time peeling another 2 words onto the front of the next line)
+        until every line fits, or only 2 words are left."""
+        words = text.split()
+        trailing_lines = []
+        while len(words) > 2 and pdfmetrics.stringWidth(" ".join(words), font_name, font_size) > max_width:
+            trailing_lines.insert(0, " ".join(words[-2:]))
+            words = words[:-2]
+        return [" ".join(words)] + trailing_lines
+
+    def _build_photo_list_block_lines(self, full_name, record, phone, font_name=None, font_size=None, max_width=None):
         """Builds the block's text lines: name, then up to 4 address-derived
         lines (address / mukkam+post / taluka+jilha / state+pincode - each
-        skipped entirely if blank, never left as an empty line), then phone."""
+        skipped entirely if blank, never left as an empty line), then phone.
+        If font/width info is given, the address line wraps its last 2 words
+        onto a new line when it doesn't fit."""
         lines = [full_name]
 
         address_mr = (record.get("address_mr", "") or "").strip()
         if address_mr:
-            lines.append(address_mr)
+            if font_name and font_size and max_width:
+                lines.extend(self._wrap_address_last_two_words(address_mr, font_name, font_size, max_width))
+            else:
+                lines.append(address_mr)
 
         mukkam_post = self._build_mukkam_post_line(record.get("mukkam_mr", ""), record.get("post_mr", ""))
         if mukkam_post:
@@ -1927,7 +1945,10 @@ class SevakJodaForm(QMainWindow):
         c = pdfcanvas.Canvas(save_path, pagesize=A4)
         photo_cache = {}
         FONT_SIZE = 9
+        MARATHI_FONT_SIZE = FONT_SIZE + 1.4
         HEADER_FONT_SIZE = 8
+        TEXT_PADDING = 0.15 * cm
+        ADDRESS_MAX_WIDTH = COL2_W - TEXT_PADDING - 0.1 * cm
 
         def new_page_header():
             self._draw_photo_list_page_header(
@@ -1974,12 +1995,15 @@ class SevakJodaForm(QMainWindow):
                 ]))
                 or record.get("card_id", card_id)
             )
-            lines = self._build_photo_list_block_lines(full_name, record, record.get("phone", ""))
-            text_x = x_left + COL1_W + 0.15 * cm
+            lines = self._build_photo_list_block_lines(
+                full_name, record, record.get("phone", ""),
+                font_name=PDF_FONT_NAME, font_size=MARATHI_FONT_SIZE, max_width=ADDRESS_MAX_WIDTH,
+            )
+            text_x = x_left + COL1_W + TEXT_PADDING
             line_height = BLOCK_H / max(6.0, len(lines) + 0.2)
             text_y = y_top - line_height * 0.8
             for line in lines:
-                self._draw_shaped_line(c, line, text_x, text_y, FONT_SIZE)
+                self._draw_shaped_line(c, line, text_x, text_y, MARATHI_FONT_SIZE)
                 text_y -= line_height
 
             # column 3: photo, stretched to fill the cell edge-to-edge

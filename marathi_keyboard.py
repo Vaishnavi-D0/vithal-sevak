@@ -4,8 +4,8 @@ On-screen Marathi (Devanagari) keyboard for correcting auto-translated text
 directly inside the app, without needing an OS-level Marathi keyboard.
 """
 
-from PyQt6.QtWidgets import QDialog, QGridLayout, QPushButton, QVBoxLayout, QTextEdit
-from PyQt6.QtGui import QFont
+from PyQt5.QtWidgets import QDialog, QGridLayout, QPushButton, QVBoxLayout, QTextEdit
+from PyQt5.QtGui import QFont
 
 ROWS = [
     "अ आ इ ई उ ऊ ए ऐ ओ औ अं अः".split(),

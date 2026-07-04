@@ -38,6 +38,8 @@ a = Analysis(
         ("scanner_capture.py", "."),
         ("translator.py", "."),
         ("drive_helper.py", "."),
+        ("marathi_text_render.py", "."),
+        ("fonts/NotoSansDevanagari-Regular.ttf", "fonts"),
     ] + extra_datas,
     hiddenimports=hidden_imports,
     hookspath=[],

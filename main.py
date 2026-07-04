@@ -18,14 +18,14 @@ from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.lib.utils import ImageReader
 from marathi_text_render import render_text_line
 
-from PyQt6.QtWidgets import (
+from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QFormLayout, QLineEdit, QTextEdit, QPushButton, QLabel, QMessageBox,
     QFileDialog, QStackedWidget, QFrame, QComboBox, QSpinBox, QListWidget,
     QListWidgetItem, QDialog
 )
-from PyQt6.QtGui import QFont, QPixmap, QDesktopServices
-from PyQt6.QtCore import Qt, QUrl
+from PyQt5.QtGui import QFont, QPixmap, QDesktopServices
+from PyQt5.QtCore import Qt, QUrl
 
 import gspread
 from google.oauth2.service_account import Credentials
@@ -57,8 +57,12 @@ WARI_OPTIONS = [
 os.makedirs(PHOTOS_DIR, exist_ok=True)
 
 # Devanagari font for PDF generation (Helvetica can't render Marathi glyphs).
+# sys._MEIPASS is where PyInstaller extracts bundled data files at runtime
+# for a frozen exe; fall back to the script's own directory when running
+# from source.
+_APP_DIR = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
 PDF_FONT_NAME = "NotoSansDevanagari"
-_PDF_FONT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fonts", "NotoSansDevanagari-Regular.ttf")
+_PDF_FONT_PATH = os.path.join(_APP_DIR, "fonts", "NotoSansDevanagari-Regular.ttf")
 try:
     pdfmetrics.registerFont(TTFont(PDF_FONT_NAME, _PDF_FONT_PATH))
 except Exception:
@@ -478,7 +482,7 @@ class SevakJodaForm(QMainWindow):
         self.photo_preview = QLabel()
         self.photo_preview.setFixedSize(150, 190)
         self.photo_preview.setStyleSheet("border: 1px solid gray;")
-        self.photo_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.photo_preview.setAlignment(Qt.AlignCenter)
 
         self.capture_btn = QPushButton()
         self.capture_btn.clicked.connect(lambda: self.run_scan(context="add"))
@@ -581,7 +585,7 @@ class SevakJodaForm(QMainWindow):
         self.edit_photo_preview = QLabel()
         self.edit_photo_preview.setFixedSize(150, 190)
         self.edit_photo_preview.setStyleSheet("border: 1px solid gray;")
-        self.edit_photo_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.edit_photo_preview.setAlignment(Qt.AlignCenter)
 
         self.edit_capture_btn = QPushButton()
         self.edit_capture_btn.clicked.connect(lambda: self.run_scan(context="edit"))
@@ -706,17 +710,17 @@ class SevakJodaForm(QMainWindow):
         ]
         if not matches:
             item = QListWidgetItem(LABELS["search_no_results"][idx])
-            item.setFlags(Qt.ItemFlag.NoItemFlags)
+            item.setFlags(Qt.NoItemFlags)
             self.wari_search_results.addItem(item)
             return
 
         for r in matches:
             item = QListWidgetItem(f'{r["card_id"]} — {self._full_name_en(r)}')
-            item.setData(Qt.ItemDataRole.UserRole, r)
+            item.setData(Qt.UserRole, r)
             self.wari_search_results.addItem(item)
 
     def select_wari_member(self, item):
-        record = item.data(Qt.ItemDataRole.UserRole)
+        record = item.data(Qt.UserRole)
         if not record:
             return
         idx = 0 if self.lang == "en" else 1
@@ -1105,7 +1109,7 @@ class SevakJodaForm(QMainWindow):
         kb_btn.setFixedWidth(30)
         kb_btn.clicked.connect(lambda: self.open_marathi_keyboard(field))
         row_layout.addWidget(field)
-        row_layout.addWidget(kb_btn, 0, Qt.AlignmentFlag.AlignTop)
+        row_layout.addWidget(kb_btn, 0, Qt.AlignTop)
         row.setLayout(row_layout)
         return row
 
@@ -1172,24 +1176,24 @@ class SevakJodaForm(QMainWindow):
         listbox = QListWidget()
         if not files:
             item = QListWidgetItem(LABELS["drive_no_photos"][idx])
-            item.setFlags(Qt.ItemFlag.NoItemFlags)
+            item.setFlags(Qt.NoItemFlags)
             listbox.addItem(item)
         else:
             for f in files:
                 item = QListWidgetItem(f["name"])
-                item.setData(Qt.ItemDataRole.UserRole, f)
+                item.setData(Qt.UserRole, f)
                 listbox.addItem(item)
         layout.addWidget(listbox)
 
         def on_choose(item):
-            data = item.data(Qt.ItemDataRole.UserRole)
+            data = item.data(Qt.UserRole)
             if not data:
                 return
             dialog.accept()
             self._load_photo_from_drive(data["id"], data["name"], context=context)
 
         listbox.itemDoubleClicked.connect(on_choose)
-        dialog.exec()
+        dialog.exec_()
 
     def _load_photo_from_drive(self, file_id, name, context="add"):
         idx = 0 if self.lang == "en" else 1
@@ -1215,7 +1219,7 @@ class SevakJodaForm(QMainWindow):
         setattr(self, f"{prefix}photo_drive_link", None)
         pixmap = QPixmap(filepath).scaled(
             preview.width(), preview.height(),
-            Qt.AspectRatioMode.KeepAspectRatio
+            Qt.KeepAspectRatio
         )
         preview.setPixmap(pixmap)
 
@@ -1415,4 +1419,4 @@ if __name__ == "__main__":
     app = QApplication(sys.argv)
     window = SevakJodaForm()
     window.show()
-    sys.exit(app.exec())
+    sys.exit(app.exec_())

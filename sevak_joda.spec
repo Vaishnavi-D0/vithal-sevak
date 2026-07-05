@@ -16,7 +16,6 @@ hidden_imports = (
     + collect_submodules("googleapiclient")
     + collect_submodules("google_auth_httplib2")
     + collect_submodules("openpyxl")
-    + collect_submodules("google_auth_oauthlib")
     + [
         "win32timezone",
         "gspread",

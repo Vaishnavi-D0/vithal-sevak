@@ -352,7 +352,7 @@ class BulkTranslateWorker(QThread):
     fills in any blank photo link by matching a Drive photo whose filename
     contains the member's card_id."""
     progress = pyqtSignal(int, int)
-    finished_ok = pyqtSignal(int, int, int)  # (translated_count, photo_linked_count, drive_files_scanned)
+    finished_ok = pyqtSignal(int, int, int, str)  # (translated_count, photo_linked_count, drive_files_scanned, drive_error)
     failed = pyqtSignal(str)
 
     EN_TO_MR_PAIRS = [
@@ -383,13 +383,18 @@ class BulkTranslateWorker(QThread):
             sheet = get_sheet(DETAILS_SHEET_NAME)
             values = sheet.get_all_values()
             if not values or len(values) < 2:
-                self.finished_ok.emit(0, 0, 0)
+                self.finished_ok.emit(0, 0, 0, "")
                 return
 
+            drive_error = None
             try:
                 drive_files = drive_helper.list_photos()
-            except RuntimeError:
-                drive_files = []  # photo linking is best-effort; translation still proceeds
+            except RuntimeError as e:
+                # photo linking is best-effort - a Drive hiccup shouldn't
+                # block translation - but the reason is surfaced in the
+                # summary dialog instead of silently showing "0 photos"
+                drive_files = []
+                drive_error = str(e)
 
             header_map = get_header_map(sheet)
             data_rows = values[1:]
@@ -429,7 +434,7 @@ class BulkTranslateWorker(QThread):
 
             if batch_data:
                 sheet.batch_update(batch_data)
-            self.finished_ok.emit(translated_count, photo_linked_count, len(drive_files))
+            self.finished_ok.emit(translated_count, photo_linked_count, len(drive_files), drive_error or "")
         except Exception as e:
             self.failed.emit(str(e))
 
@@ -1709,9 +1714,19 @@ class SevakJodaForm(QMainWindow):
         idx = 0 if self.lang == "en" else 1
         self.statusBar().showMessage(f"{LABELS['status_translating'][idx]} ({current}/{total})")
 
-    def _on_bulk_translate_finished(self, translated_count, photo_linked_count, drive_files_scanned):
+    def _on_bulk_translate_finished(self, translated_count, photo_linked_count, drive_files_scanned, drive_error):
         idx = 0 if self.lang == "en" else 1
         self._set_busy(False)
+        if drive_error:
+            body = (
+                f"{translated_count} Marathi field(s) translated.\n\n"
+                f"Photo linking was skipped - could not read the Drive folder: {drive_error}"
+                if idx == 0
+                else f"{translated_count} मराठी फील्ड भाषांतरित.\n\n"
+                     f"फोटो जोडणी वगळली - ड्राइव्ह फोल्डर वाचता आले नाही: {drive_error}"
+            )
+            QMessageBox.warning(self, LABELS["success_title"][idx], body)
+            return
         body = (
             f"{translated_count} Marathi field(s) translated and {photo_linked_count} photo link(s) added!\n"
             f"(Scanned {drive_files_scanned} photo(s) in the Drive folder.)"
